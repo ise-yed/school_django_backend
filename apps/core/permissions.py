@@ -31,6 +31,21 @@ class IsTeacherOrSchoolAdmin(BasePermission):
         )
 
 
+class IsSchoolAdminOrTeacherReadOnly(BasePermission):
+    """
+    ادمین مدرسه دسترسی کامل (CRUD) دارد؛
+    معلم فقط دسترسی مشاهده (GET, HEAD, OPTIONS) دارد.
+    """
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated and request.user.school_id):
+            return False
+        if request.user.role == User.Role.SCHOOL_ADMIN:
+            return True
+        if request.user.role == User.Role.TEACHER and request.method in SAFE_METHODS:
+            return True
+        return False
+
+
 class IsParentReadOnly(BasePermission):
     """ولی فقط دسترسی مشاهده (Read-only) دارد."""
     def has_permission(self, request, view):
