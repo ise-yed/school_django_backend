@@ -1,16 +1,19 @@
 from django.db.models import Prefetch
-from rest_framework.permissions import SAFE_METHODS
+from rest_framework.decorators import action
 from apps.accounts.models import User
 from apps.core.permissions import (
     IsParentReadOnly,
     IsSchoolAdminOrTeacherReadOnly,
+    IsTeacherOrSchoolAdmin,
 )
 from apps.core.viewsets import BaseViewSet
 from apps.students.api.v1.serializers.student import (
     EnrollmentSerializer,
+    StudentSearchResultSerializer,
     StudentSerializer,
 )
 from apps.students.models import Enrollment, Student
+from apps.students.services import apply_student_search_and_filters
 
 
 class StudentAccessPermission(IsSchoolAdminOrTeacherReadOnly):
@@ -36,21 +39,52 @@ class StudentViewSet(BaseViewSet):
         qs = super().get_queryset()
         user = self.request.user
 
-        # اگر ولی است، فقط لینک‌های تاییدشده یا ثبت‌شده برای او در همان مدرسه
+        # اگر ولی است، فقط فرزندان تأییدشده‌ی خودش را ببیند
         if user.role == User.Role.PARENT:
             qs = qs.filter(parent_links__parent_user=user, parent_links__is_verified=True)
 
-        classroom_id = self.request.query_params.get("classroom")
-        if classroom_id:
-            qs = qs.filter(enrollments__classroom_id=classroom_id, enrollments__is_active=True)
+        # اعمال فیلترهای جستجو و pg_trgm
+        qs = apply_student_search_and_filters(qs, self.request.query_params)
 
         active_enrollments = Enrollment.objects.filter(
             is_active=True, academic_year__is_current=True
-        ).select_related("classroom")
+        ).select_related("classroom", "classroom__grade")
+
+        # اگر کوئری با similarity مرتب نشده باشد، distinct عادی اعمال شود
+        if "q" not in self.request.query_params:
+            qs = qs.distinct()
+        else:
+            # در صورت وجود JOIN از سمت معلم یا فیلتر کلاس، جلوگیری از تکرار رکوردها با حفظ ترتیب امتیاز شباهت
+            qs = qs.filter(pk__in=qs.values("pk"))
+            qs = apply_student_search_and_filters(
+                Student.objects.filter(pk__in=qs.values("pk")),
+                self.request.query_params,
+            )
 
         return qs.prefetch_related(
             Prefetch("enrollments", queryset=active_enrollments, to_attr="prefetched_enrollments")
-        ).distinct()
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="search",
+        permission_classes=[IsTeacherOrSchoolAdmin],
+        serializer_class=StudentSearchResultSerializer,
+    )
+    def search(self, request):
+        """
+        جستجوی فازی دانش‌آموزان (مخصوص معلم و کادر آموزشی) با پشتیبانی از:
+        ?q=...&first_name=...&last_name=...&father_name=...&national_code=...&classroom=...
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
 
 class EnrollmentViewSet(BaseViewSet):

@@ -1,4 +1,7 @@
-from apps.core.normalizers import normalize_persian_text
+from django.contrib.postgres.search import TrigramSimilarity, TrigramWordSimilarity
+from django.db.models import F, Q, Value
+from django.db.models.functions import Greatest
+from apps.core.normalizers import normalize_digits, normalize_persian_text
 
 TWO_WORD_FIRST_NAME_PREFIXES = {
     "سید", "سیده", "سادات", "امیر", "محمد", "فاطمه", "زهرا",
@@ -35,8 +38,6 @@ def split_persian_full_name(full_name: str) -> tuple[str, str]:
     if len(tokens) == 2:
         return tokens[0], tokens[1]
 
-    # ۳ کلمه یا بیشتر:
-    # حالت ۱: کلمه اول «سید / سیده» و کلمه دوم و سوم هم جزئی از نام کوچک باشند (مثلاً «سید محمد رضا علوی»)
     if (
         len(tokens) >= 4
         and tokens[0] in {"سید", "سیده"}
@@ -45,15 +46,77 @@ def split_persian_full_name(full_name: str) -> tuple[str, str]:
     ):
         return " ".join(tokens[:3]), " ".join(tokens[3:])
 
-    # حالت ۲: کلمه اول پیشوند رایج نام کوچک باشد یا کلمه دوم پسوند نام کوچک باشد (مثلاً «محمد حسین رضایی» یا «سید علی حسینی»)
     if tokens[0] in TWO_WORD_FIRST_NAME_PREFIXES and (
         tokens[0] in {"سید", "سیده"} or tokens[1] in SECOND_PART_FIRST_NAMES
     ):
         return " ".join(tokens[:2]), " ".join(tokens[2:])
 
-    # حالت ۳: پیشوند نام خانوادگی در کلمه دوم (مثلاً «علی ابوطالبی فرد»)
     if tokens[1] in FAMILY_NAME_PREFIXES:
         return tokens[0], " ".join(tokens[1:])
 
-    # حالت پیش‌فرض: کلمه اول نام، بقیه نام خانوادگی
     return tokens[0], " ".join(tokens[1:])
+
+
+def apply_student_search_and_filters(queryset, params: dict, similarity_threshold: float = 0.25):
+    """
+    جستجوی فازی و فیلتر دانش‌آموزان بر اساس:
+    - q: عبارت جستجوی کلی (نام، نام خانوادگی، نام پدر یا کد ملی) با pg_trgm
+    - first_name, last_name, father_name: فیلترهای متنی با تحمل تفاوت املایی
+    - national_code: کد ملی (کامل یا بخشی از آن)
+    - classroom: شناسه کلاس
+    """
+    classroom_id = params.get("classroom")
+    if classroom_id:
+        queryset = queryset.filter(
+            enrollments__classroom_id=classroom_id,
+            enrollments__is_active=True,
+        )
+
+    national_code = normalize_digits(params.get("national_code", ""))
+    if national_code:
+        queryset = queryset.filter(national_code__icontains=national_code)
+
+    first_name = normalize_persian_text(params.get("first_name", ""))
+    if first_name:
+        queryset = queryset.annotate(
+            fn_sim=TrigramWordSimilarity(first_name, "first_name")
+        ).filter(Q(first_name__icontains=first_name) | Q(fn_sim__gte=similarity_threshold))
+
+    last_name = normalize_persian_text(params.get("last_name", ""))
+    if last_name:
+        queryset = queryset.annotate(
+            ln_sim=TrigramWordSimilarity(last_name, "last_name")
+        ).filter(Q(last_name__icontains=last_name) | Q(ln_sim__gte=similarity_threshold))
+
+    father_name = normalize_persian_text(params.get("father_name", ""))
+    if father_name:
+        queryset = queryset.annotate(
+            fa_sim=TrigramWordSimilarity(father_name, "father_name")
+        ).filter(Q(father_name__icontains=father_name) | Q(fa_sim__gte=similarity_threshold))
+
+    raw_q = params.get("q", "").strip()
+    if raw_q:
+        norm_digits = normalize_digits(raw_q)
+        # اگر ورودی فقط عدد است، روی کد ملی و کد دانش‌آموزی جستجو کن
+        if norm_digits.isdigit():
+            queryset = queryset.annotate(similarity=Value(1.0)).filter(
+                Q(national_code__icontains=norm_digits)
+                | Q(student_code__icontains=norm_digits)
+            )
+        else:
+            norm_q = normalize_persian_text(raw_q)
+            queryset = (
+                queryset.annotate(
+                    similarity=Greatest(
+                        TrigramWordSimilarity(norm_q, "normalized_search_name"),
+                        TrigramSimilarity("normalized_search_name", norm_q),
+                    )
+                )
+                .filter(
+                    Q(normalized_search_name__icontains=norm_q)
+                    | Q(similarity__gte=similarity_threshold)
+                )
+                .order_by("-similarity", "last_name", "first_name", "id")
+            )
+
+    return queryset

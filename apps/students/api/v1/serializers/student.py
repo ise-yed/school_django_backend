@@ -7,7 +7,9 @@ from apps.students.models import Enrollment, Student
 
 
 class StudentSerializer(serializers.ModelSerializer):
+    current_classroom_id = serializers.SerializerMethodField()
     current_classroom_name = serializers.SerializerMethodField()
+    current_grade_title = serializers.SerializerMethodField()
 
     class Meta:
         model = Student
@@ -19,22 +21,34 @@ class StudentSerializer(serializers.ModelSerializer):
             "national_code",
             "student_code",
             "is_active",
+            "current_classroom_id",
             "current_classroom_name",
+            "current_grade_title",
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
 
-    def get_current_classroom_name(self, obj) -> str | None:
-        # استفاده از prefetch_related برای جلوگیری از N+1
+    def _get_active_enrollment(self, obj):
         enrollments = getattr(obj, "prefetched_enrollments", None)
         if enrollments is not None:
-            return enrollments[0].classroom.name if enrollments else None
-        enrollment = (
+            return enrollments[0] if enrollments else None
+        return (
             obj.enrollments.filter(is_active=True, academic_year__is_current=True)
-            .select_related("classroom")
+            .select_related("classroom", "classroom__grade")
             .first()
         )
+
+    def get_current_classroom_id(self, obj) -> int | None:
+        enrollment = self._get_active_enrollment(obj)
+        return enrollment.classroom_id if enrollment else None
+
+    def get_current_classroom_name(self, obj) -> str | None:
+        enrollment = self._get_active_enrollment(obj)
         return enrollment.classroom.name if enrollment else None
+
+    def get_current_grade_title(self, obj) -> str | None:
+        enrollment = self._get_active_enrollment(obj)
+        return enrollment.classroom.grade.title if enrollment else None
 
     def validate_national_code(self, value):
         try:
@@ -65,6 +79,30 @@ class StudentSerializer(serializers.ModelSerializer):
         if not cleaned:
             raise serializers.ValidationError("نام خانوادگی الزامی است.")
         return cleaned
+
+
+class StudentSearchResultSerializer(StudentSerializer):
+    """سریالایزر نتایج جستجوی دانش‌آموز (شامل نام پدر، کلاس و امتیاز شباهت فازی)."""
+    full_name = serializers.SerializerMethodField()
+    similarity = serializers.FloatField(read_only=True, required=False)
+
+    class Meta(StudentSerializer.Meta):
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "full_name",
+            "father_name",
+            "national_code",
+            "student_code",
+            "current_classroom_id",
+            "current_classroom_name",
+            "current_grade_title",
+            "similarity",
+        ]
+
+    def get_full_name(self, obj) -> str:
+        return f"{obj.first_name} {obj.last_name}".strip()
 
 
 class EnrollmentSerializer(serializers.ModelSerializer):
