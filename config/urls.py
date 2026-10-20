@@ -9,4 +9,6 @@ urlpatterns = [
     # API v1
     path("api/v1/schools/", include("apps.schools.api.v1.urls")),
     path("api/v1/accounts/", include("apps.accounts.api.v1.urls")),
+    path("api/v1/students/", include("apps.students.api.v1.urls")),
+    path("api/v1/imports/", include("apps.imports.api.v1.urls")),
 ]
