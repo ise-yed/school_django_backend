@@ -7,6 +7,8 @@ from apps.imports.api.v1.views.import_excel import (
     ImportMappingViewSet,
     ImportPreviewView,
     ImportSampleTemplateView,
+    ParentExcelImportView,
+    ParentImportTemplateView,
 )
 
 router = DefaultRouter()
@@ -18,5 +20,7 @@ urlpatterns = [
     path("preview/", ImportPreviewView.as_view(), name="import-preview"),
     path("commit/", ImportCommitView.as_view(), name="import-commit"),
     path("template/", ImportSampleTemplateView.as_view(), name="import-template"),
+    path("parents/", ParentExcelImportView.as_view(), name="import-parents"),
+    path("parents/template/", ParentImportTemplateView.as_view(), name="import-parents-template"),
     path("", include(router.urls)),
 ]

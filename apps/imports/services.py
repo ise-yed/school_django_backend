@@ -801,3 +801,139 @@ def generate_errors_workbook(import_log: ImportLog) -> bytes:
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
+
+
+def import_parents_excel(school, file_obj, sheet_name: str | None = None) -> dict:
+    """
+    ایمپورت اکسل دوم برای اتصال اولیا به دانش‌آموزان بر اساس ستون‌های
+    «کد ملی دانش‌آموز» و «موبایل ولی» (به همراه ستون اختیاری «نسبت»).
+    """
+    wb = load_workbook_safely(file_obj)
+    selected_sheet = sheet_name if sheet_name in wb.sheetnames else wb.sheetnames[0]
+    ws = wb[selected_sheet]
+
+    rows = unmerge_and_extract_rows(ws)
+    header_row_1based, columns = guess_header_row_and_columns(rows)
+    mapping = suggest_column_mapping(school, columns)
+
+    nc_col = mapping.get("national_code")
+    phone_col = mapping.get("parent_phone")
+    if not nc_col or not phone_col:
+        raise ValidationError(
+            "ستون‌های «کد ملی» و «موبایل ولی» در فایل اکسل تشخیص داده نشدند."
+        )
+
+    col_index = {normalize_persian_text(c): i for i, c in enumerate(columns)}
+    nc_idx = col_index[normalize_persian_text(nc_col)]
+    phone_idx = col_index[normalize_persian_text(phone_col)]
+
+    valid_pairs = []
+    errors = []
+
+    for offset, r in enumerate(rows[header_row_1based:]):
+        excel_row_num = header_row_1based + 1 + offset
+        if not any(c.strip() for c in r):
+            continue
+
+        raw_nc = r[nc_idx] if nc_idx < len(r) else ""
+        raw_phone = r[phone_idx] if phone_idx < len(r) else ""
+
+        row_errors = []
+        nc = ""
+        phone = ""
+
+        try:
+            nc = normalize_and_validate_national_code(raw_nc)
+        except ValueError as e:
+            row_errors.append(f"کد ملی: {e}")
+
+        try:
+            phone = normalize_phone(raw_phone)
+        except ValueError as e:
+            row_errors.append(f"موبایل ولی: {e}")
+
+        if row_errors:
+            errors.append(
+                {
+                    "row_number": excel_row_num,
+                    "national_code": raw_nc,
+                    "parent_phone": raw_phone,
+                    "error_reason": " | ".join(row_errors),
+                }
+            )
+            continue
+
+        valid_pairs.append((excel_row_num, nc, phone))
+
+    codes = [item[1] for item in valid_pairs]
+    students_map = {
+        s.national_code: s
+        for s in Student.objects.for_school(school).filter(national_code__in=codes)
+    }
+
+    linked_count = 0
+    with transaction.atomic():
+        for excel_row_num, nc, phone in valid_pairs:
+            student = students_map.get(nc)
+            if not student:
+                errors.append(
+                    {
+                        "row_number": excel_row_num,
+                        "national_code": nc,
+                        "parent_phone": phone,
+                        "error_reason": "دانش‌آموزی با این کد ملی در مدرسه ثبت نشده است.",
+                    }
+                )
+                continue
+
+            parent_user, _ = User.objects.get_or_create(
+                school=school,
+                phone_number=phone,
+                defaults={
+                    "role": User.Role.PARENT,
+                    "first_name": student.father_name,
+                    "last_name": student.last_name,
+                    "is_active": True,
+                },
+            )
+            ParentStudentLink.objects.update_or_create(
+                school=school,
+                parent_user=parent_user,
+                student=student,
+                defaults={"is_verified": True},
+            )
+            linked_count += 1
+
+    return {
+        "total_rows": len(valid_pairs) + len(errors) - sum(
+            1 for e in errors if "در مدرسه ثبت نشده" in e["error_reason"]
+        ),
+        "linked_count": linked_count,
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
+def generate_parent_import_template_workbook() -> bytes:
+    """قالب نمونه اکسل دوم (کد ملی دانش‌آموز + موبایل ولی) با فرمت متنی (@)."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "موبایل اولیا"
+    ws.sheet_view.rightToLeft = True
+
+    headers = ["کد ملی دانش‌آموز", "موبایل ولی"]
+    ws.append(headers)
+    ws.append(["0012345679", "09121112233"])
+
+    for col_idx in range(1, 3):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center")
+
+    for row_idx in range(2, 100):
+        ws.cell(row=row_idx, column=1).number_format = "@"
+        ws.cell(row=row_idx, column=2).number_format = "@"
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()

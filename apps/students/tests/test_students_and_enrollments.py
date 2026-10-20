@@ -4,7 +4,6 @@ from apps.accounts.models import User
 from apps.schools.models import AcademicYear, Classroom, Grade, School, TeacherAssignment
 from apps.students.models import Enrollment, ParentStudentLink, Student
 
-
 @pytest.fixture
 def students_setup(db):
     school_a = School.objects.create(name="دبیرستان البرز", code="alborz")

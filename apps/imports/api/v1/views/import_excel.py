@@ -18,7 +18,9 @@ from apps.imports.services import (
     analyze_excel_file,
     commit_import,
     generate_errors_workbook,
+    generate_parent_import_template_workbook,
     generate_sample_template_workbook,
+    import_parents_excel,
     preview_import,
 )
 
@@ -118,4 +120,34 @@ class ImportLogViewSet(BaseViewSet):
         response["Content-Disposition"] = (
             f'attachment; filename="import_errors_{import_log.id}.xlsx"'
         )
+        return response
+    
+    
+class ParentExcelImportView(views.APIView):
+    """آپلود فایل اکسل دوم شامل «کد ملی دانش‌آموز» و «موبایل ولی» توسط کادر آموزشی."""
+    permission_classes = [IsSchoolAdmin]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        serializer = AnalyzeImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = import_parents_excel(
+            school=request.user.school,
+            file_obj=serializer.validated_data["file"],
+            sheet_name=serializer.validated_data.get("sheet_name") or None,
+        )
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class ParentImportTemplateView(views.APIView):
+    """دانلود قالب نمونه اکسل دوم برای وارد کردن موبایل اولیا."""
+    permission_classes = [IsSchoolAdmin]
+
+    def get(self, request):
+        content = generate_parent_import_template_workbook()
+        response = HttpResponse(
+            content,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="parent_phones_template.xlsx"'
         return response
