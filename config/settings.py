@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "apps.imports",
     "apps.attendance",
     "apps.discipline",
+    "apps.notifications",
 ]
 
 
@@ -109,3 +110,16 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Celery Configuration
+CELERY_BROKER_URL = env("REDIS_URL", default="redis://127.0.0.1:6379/0")
+CELERY_RESULT_BACKEND = env("REDIS_URL", default="redis://127.0.0.1:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+# لایه انتزاعی پیامک و پوش‌نوتیفیکیشن (از طریق متغیرهای محیطی)
+SMS_PROVIDER = env("SMS_PROVIDER", default="console")  # console | kavenegar | melipayamak
+SMS_API_KEY = env("SMS_API_KEY", default="")
+SMS_SENDER_NUMBER = env("SMS_SENDER_NUMBER", default="")
