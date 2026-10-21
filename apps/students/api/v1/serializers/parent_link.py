@@ -1,6 +1,7 @@
 from django.db import transaction
 from rest_framework import serializers
 from apps.accounts.models import User
+from apps.core.fields import SchoolScopedPrimaryKeyRelatedField
 from apps.core.normalizers import (
     normalize_and_validate_national_code,
     normalize_persian_text,
@@ -10,6 +11,9 @@ from apps.students.models import ParentStudentLink, Student
 
 
 class ParentStudentLinkSerializer(serializers.ModelSerializer):
+    student = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Student.objects.all(),
+    )
     parent_phone = serializers.CharField(source="parent_user.phone_number", read_only=True)
     parent_first_name = serializers.CharField(source="parent_user.first_name", read_only=True)
     parent_last_name = serializers.CharField(source="parent_user.last_name", read_only=True)

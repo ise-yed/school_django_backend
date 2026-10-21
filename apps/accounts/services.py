@@ -1,7 +1,11 @@
 import hashlib
+import logging
 import secrets
 from django.core.cache import cache
 from rest_framework.exceptions import Throttled, ValidationError
+from apps.notifications.channels.sms import get_sms_provider
+
+logger = logging.getLogger(__name__)
 
 OTP_TTL_SECONDS = 120          # اعتبار کد: ۲ دقیقه
 OTP_RATE_WINDOW = 600          # پنجره محدودیت ارسال: ۱۰ دقیقه
@@ -27,7 +31,13 @@ def generate_and_send_otp(phone: str) -> str:
     cache.set(attempts_key, 0, timeout=OTP_TTL_SECONDS)
     cache.set(rate_key, req_count + 1, timeout=OTP_RATE_WINDOW)
 
-    # در مرحله ۹ به سرویس پیامک در اپ notifications متصل می‌شود
+    # ارسال پیامک از طریق ارائه‌دهنده پیامک
+    sms_provider = get_sms_provider()
+    message = f"کد تأیید ورود شما به سامانه مدرسه: {code}"
+    sms_provider.send_sms(phone, message)
+    logger.info("OTP generated for %s: %s", phone, code)
+    print(f"[OTP Console Log] Phone: {phone} | Code: {code}")
+
     return code
 
 

@@ -20,8 +20,11 @@ class TeacherAssignmentViewSet(BaseViewSet):
         qs = super().get_queryset()
         classroom_id = self.request.query_params.get("classroom")
         teacher_id = self.request.query_params.get("teacher")
+        day_of_week = self.request.query_params.get("day_of_week")
         if classroom_id:
             qs = qs.filter(classroom_id=classroom_id)
         if teacher_id:
             qs = qs.filter(teacher_id=teacher_id)
+        if day_of_week is not None and day_of_week != "":
+            qs = qs.filter(day_of_week=day_of_week)
         return qs

@@ -16,7 +16,9 @@ class ConsoleSMSProvider(BaseSMSProvider):
     """ارائه‌دهنده پیش‌فرض برای محیط توسعه و تست (ثبت در لاگ بدون ارسال خارجی)."""
     def send_sms(self, phone_number: str, message: str) -> str:
         logger.info("SMS SENT to %s | Message: %s", phone_number, message)
+        print(f"[Console SMS] To: {phone_number} | Message: {message}")
         return f"console-sms-{phone_number}"
+
 
 
 class KavenegarSMSProvider(BaseSMSProvider):

@@ -15,7 +15,9 @@ from apps.attendance.services import (
     get_classroom_attendance_sheet,
 )
 from apps.core.fields import JalaliDateField
-from apps.core.permissions import IsParentReadOnly, IsTeacherOrSchoolAdmin
+from apps.core.models import AuditLog
+from apps.core.permissions import IsParentReadOnly, IsSchoolAdmin, IsTeacherOrSchoolAdmin
+from apps.core.serializers import AuditLogSerializer
 from apps.core.viewsets import BaseViewSet
 
 
@@ -74,12 +76,123 @@ class AttendanceRecordViewSet(BaseViewSet):
 
         return qs.distinct()
 
+    def perform_create(self, serializer):
+        classroom = serializer.validated_data["classroom"]
+        session_number = serializer.validated_data.get("session_number", 0)
+        date = serializer.validated_data.get("date")
+        check_teacher_classroom_and_session_access(
+            self.request.user, classroom, session_number, date=date
+        )
+        instance = serializer.save(school=self.get_school(), recorded_by=self.request.user)
+        AuditLog.objects.create(
+            school=self.get_school(),
+            actor=self.request.user,
+            action=AuditLog.Action.CREATE,
+            target_model="AttendanceRecord",
+            target_id=str(instance.id),
+            changes={
+                "status": {"old": None, "new": instance.status},
+                "note": {"old": None, "new": instance.note or ""},
+                "date": {"old": None, "new": str(instance.date)},
+                "session_number": {"old": None, "new": instance.session_number},
+                "student_id": {"old": None, "new": instance.student_id},
+                "classroom_id": {"old": None, "new": instance.classroom_id},
+            },
+            ip_address=self.get_client_ip(),
+        )
+
     def perform_update(self, serializer):
         instance = self.get_object()
         check_teacher_classroom_and_session_access(
-            self.request.user, instance.classroom, instance.session_number
+            self.request.user, instance.classroom, instance.session_number, date=instance.date
         )
-        serializer.save(recorded_by=self.request.user)
+        new_classroom = serializer.validated_data.get("classroom", instance.classroom)
+        new_session = serializer.validated_data.get("session_number", instance.session_number)
+        new_date = serializer.validated_data.get("date", instance.date)
+        if (
+            new_classroom != instance.classroom
+            or new_session != instance.session_number
+            or new_date != instance.date
+        ):
+            check_teacher_classroom_and_session_access(
+                self.request.user, new_classroom, new_session, date=new_date
+            )
+
+        old_values = {
+            "status": instance.status,
+            "note": instance.note or "",
+            "date": str(instance.date),
+            "session_number": instance.session_number,
+            "classroom_id": instance.classroom_id,
+        }
+        updated = serializer.save(recorded_by=self.request.user)
+        new_values = {
+            "status": updated.status,
+            "note": updated.note or "",
+            "date": str(updated.date),
+            "session_number": updated.session_number,
+            "classroom_id": updated.classroom_id,
+        }
+        diff = {
+            k: {"old": old_values[k], "new": new_values[k]}
+            for k in old_values
+            if old_values[k] != new_values[k]
+        }
+        if diff:
+            AuditLog.objects.create(
+                school=self.get_school(),
+                actor=self.request.user,
+                action=AuditLog.Action.UPDATE,
+                target_model="AttendanceRecord",
+                target_id=str(updated.id),
+                changes=diff,
+                ip_address=self.get_client_ip(),
+            )
+
+    def perform_destroy(self, instance):
+        check_teacher_classroom_and_session_access(
+            self.request.user, instance.classroom, instance.session_number, date=instance.date
+        )
+        record_id = str(instance.id)
+        school = self.get_school()
+        old_values = {
+            "status": instance.status,
+            "note": instance.note or "",
+            "date": str(instance.date),
+            "session_number": instance.session_number,
+            "classroom_id": instance.classroom_id,
+            "student_id": instance.student_id,
+        }
+        instance.delete()
+        AuditLog.objects.create(
+            school=school,
+            actor=self.request.user,
+            action=AuditLog.Action.DELETE,
+            target_model="AttendanceRecord",
+            target_id=record_id,
+            changes={k: {"old": v, "new": None} for k, v in old_values.items()},
+            ip_address=self.get_client_ip(),
+        )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="history",
+        permission_classes=[IsTeacherOrSchoolAdmin],
+    )
+    def history(self, request, pk=None):
+        """
+        مشاهده‌ی تاریخچه‌ی تغییرات (AuditLog) یک رکورد حضور و غیاب خاص.
+        """
+        record = self.get_object()
+        logs = (
+            AuditLog.objects.for_school(self.get_school())
+            .filter(target_model="AttendanceRecord", target_id=str(record.id))
+            .select_related("actor")
+            .order_by("-created_at", "-id")
+        )
+        serializer = AuditLogSerializer(logs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(
         detail=False,
@@ -105,6 +218,7 @@ class AttendanceRecordViewSet(BaseViewSet):
             session_number=data["session_number"],
             records=data["records"],
             default_present_for_others=data["default_present_for_others"],
+            ip_address=self.get_client_ip(),
         )
         # برگرداندن تاریخ به فرمت شمسی در خروجی
         result["date"] = JalaliDateField().to_representation(data["date"])
@@ -143,3 +257,11 @@ class AttendanceRecordViewSet(BaseViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class AttendanceAuditLogViewSet(BaseViewSet):
+    """مشاهده‌ی تمام لاگ‌های تغییرات حضور و غیاب مدرسه (مخصوص کادر آموزشی SCHOOL_ADMIN)."""
+    queryset = AuditLog.objects.filter(target_model="AttendanceRecord").select_related("actor")
+    serializer_class = AuditLogSerializer
+    permission_classes = [IsSchoolAdmin]
+    http_method_names = ["get", "head", "options"]

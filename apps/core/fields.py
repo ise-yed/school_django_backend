@@ -32,3 +32,23 @@ class JalaliDateField(serializers.DateField):
             except ValueError as e:
                 raise serializers.ValidationError(f"تاریخ شمسی نامعتبر است: {e}")
         return super().to_internal_value(clean)
+
+
+class SchoolScopedPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
+    """
+    محدودسازی خودکار QuerySet کلید خارجی به مدرسه‌ی کاربر جاری (جلوگیری از آسیب‌پذیری IDOR).
+    """
+
+    def get_queryset(self):
+        request = self.context.get("request", None)
+        qs = super().get_queryset()
+        if qs is None:
+            return qs
+        user = getattr(request, "user", None) if request else None
+        if user and user.is_authenticated and getattr(user, "school_id", None):
+            school = user.school
+            if hasattr(qs, "for_school"):
+                return qs.for_school(school)
+            if hasattr(qs.model, "school"):
+                return qs.filter(school=school)
+        return qs

@@ -1,12 +1,20 @@
 from rest_framework import serializers
 from apps.accounts.models import User
-from apps.schools.models import TeacherAssignment
+from apps.core.fields import SchoolScopedPrimaryKeyRelatedField
+from apps.schools.models import Classroom, TeacherAssignment
 
 
 class TeacherAssignmentSerializer(serializers.ModelSerializer):
+    teacher = SchoolScopedPrimaryKeyRelatedField(
+        queryset=User.objects.filter(role=User.Role.TEACHER),
+    )
+    classroom = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Classroom.objects.all(),
+    )
     teacher_name = serializers.SerializerMethodField()
     classroom_name = serializers.CharField(source="classroom.name", read_only=True)
     grade_title = serializers.CharField(source="classroom.grade.title", read_only=True)
+    day_of_week_display = serializers.CharField(source="get_day_of_week_display", read_only=True)
 
     class Meta:
         model = TeacherAssignment
@@ -18,6 +26,8 @@ class TeacherAssignmentSerializer(serializers.ModelSerializer):
             "classroom_name",
             "grade_title",
             "subject_name",
+            "day_of_week",
+            "day_of_week_display",
             "session_number",
             "created_at",
         ]

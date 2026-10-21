@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.core.fields import JalaliDateField
+from apps.core.fields import JalaliDateField, SchoolScopedPrimaryKeyRelatedField
 from apps.schools.models import AcademicYear, Classroom, Grade
 
 
@@ -28,6 +28,12 @@ class GradeSerializer(serializers.ModelSerializer):
 
 
 class ClassroomSerializer(serializers.ModelSerializer):
+    academic_year = SchoolScopedPrimaryKeyRelatedField(
+        queryset=AcademicYear.objects.all(),
+    )
+    grade = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Grade.objects.all(),
+    )
     grade_title = serializers.CharField(source="grade.title", read_only=True)
     academic_year_title = serializers.CharField(source="academic_year.title", read_only=True)
 

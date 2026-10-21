@@ -102,6 +102,15 @@ class Classroom(SchoolOwnedModel):
 
 
 class TeacherAssignment(SchoolOwnedModel):
+    class DayOfWeek(models.IntegerChoices):
+        SATURDAY = 0, "شنبه"
+        SUNDAY = 1, "یکشنبه"
+        MONDAY = 2, "دوشنبه"
+        TUESDAY = 3, "سه‌شنبه"
+        WEDNESDAY = 4, "چهارشنبه"
+        THURSDAY = 5, "پنجشنبه"
+        FRIDAY = 6, "جمعه"
+
     teacher = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -115,6 +124,12 @@ class TeacherAssignment(SchoolOwnedModel):
         verbose_name="کلاس",
     )
     subject_name = models.CharField(max_length=100, verbose_name="نام درس")
+    day_of_week = models.PositiveSmallIntegerField(
+        choices=DayOfWeek.choices,
+        null=True,
+        blank=True,
+        verbose_name="روز هفته",
+    )
     session_number = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(6)],
         verbose_name="شماره زنگ",
@@ -123,17 +138,19 @@ class TeacherAssignment(SchoolOwnedModel):
     class Meta:
         verbose_name = "تخصیص معلم به کلاس"
         verbose_name_plural = "تخصیص‌های معلم به کلاس"
-        ordering = ["classroom_id", "session_number", "id"]
+        ordering = ["classroom_id", "day_of_week", "session_number", "id"]
         indexes = [
             models.Index(fields=["school", "teacher"]),
             models.Index(fields=["school", "classroom"]),
+            models.Index(fields=["school", "classroom", "day_of_week"]),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["school", "classroom", "teacher", "subject_name", "session_number"],
+                fields=["school", "classroom", "teacher", "subject_name", "day_of_week", "session_number"],
                 name="uq_teacher_assignment_full",
             )
         ]
 
     def __str__(self):
-        return f"{self.teacher} - {self.classroom} ({self.subject_name} - زنگ {self.session_number})"
+        day_str = f" - {self.get_day_of_week_display()}" if self.day_of_week is not None else ""
+        return f"{self.teacher} - {self.classroom} ({self.subject_name}{day_str} زنگ {self.session_number})"

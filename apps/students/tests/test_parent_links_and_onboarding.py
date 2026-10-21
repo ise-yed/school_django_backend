@@ -134,14 +134,15 @@ def test_parent_self_onboarding_with_national_code_and_unauthorized_protection(
     parent_onboarding_setup,
 ):
     """
-    ۱. اولین ورود ولی با «شماره موبایل + کد ملی دانش‌آموز» و OTP -> اتصال برقرار و وارد می‌شود.
-    ۲. اگر فرد دیگری با شماره موبایل متفاوت و همان کد ملی دانش‌آموز تلاش کند وارد شود:
-       رکورد در انتظار تأیید کادر آموزشی (is_verified=False) می‌ماند و اجازه ورود نمی‌گیرد (403)
-       تا زمانی که کادر آموزشی مدرسه آن را تأیید کند.
+    ۱. اگر شماره‌ای در اکسل یا توسط مدرسه ثبت نشده باشد و با کد ملی وارد شود:
+       رکورد اتصال در انتظار تأیید کادر آموزشی (is_verified=False) ثبت شده و به کاربر خطای ۴۰۳ داده می‌شود
+       تا از تصاحب غیرمجاز حساب دانش‌آموز توسط افراد غیرمجاز جلوگیری شود.
+    ۲. پس از تأیید کادر آموزشی، ولی با OTP وارد می‌شود و توکن دریافت می‌کند.
+    ۳. اگر شماره از قبل در اکسل یا توسط کادر آموزشی ثبت شده باشد (is_verified=True)، مستقیماً وارد می‌شود.
     """
     client = APIClient()
 
-    # ۱. اولین ولی با شماره موبایل + کد ملی دانش‌آموز درخواست OTP می‌دهد
+    # ۱. شماره‌ای که در اکسل نبوده، با کد ملی دانش‌آموز درخواست OTP می‌دهد
     res_req = client.post(
         "/api/v1/accounts/auth/parent/otp/request/",
         {
@@ -160,29 +161,16 @@ def test_parent_self_onboarding_with_national_code_and_unauthorized_protection(
             "student_national_code": "0012345679",
         },
     )
-    assert res_verify1.status_code == 200
-    assert "access" in res_verify1.data
-
-    # ۲. فرد دوم (مثلاً دانش‌آموز با سیم‌کارت خودش یا شماره جدید) با همان کد ملی تلاش می‌کند وارد شود
-    code2 = generate_and_send_otp("09351112233")
-    res_verify2 = client.post(
-        "/api/v1/accounts/auth/parent/otp/verify/",
-        {
-            "phone_number": "09351112233",
-            "code": code2,
-            "student_national_code": "0012345679",
-        },
-    )
-    # باید 403 بگیرد چون برای این دانش‌آموز قبلاً ولی ثبت شده و شماره جدید نیاز به تأیید کادر آموزشی دارد
-    assert res_verify2.status_code == 403
+    # باید 403 بگیرد و منتظر تأیید کادر آموزشی باشد (جلوگیری از تصاحب خودکار)
+    assert res_verify1.status_code == 403
 
     unverified_link = ParentStudentLink.objects.get(
         student=parent_onboarding_setup["student_a1"],
-        parent_user__phone_number="09351112233",
+        parent_user__phone_number="09124445566",
     )
     assert unverified_link.is_verified is False
 
-    # ۳. حالا کادر آموزشی مدرسه شماره دوم (مثلاً مادر دانش‌آموز) را تأیید می‌کند
+    # ۲. کادر آموزشی مدرسه شماره را بررسی و تأیید می‌کند
     client.force_authenticate(user=parent_onboarding_setup["admin_a"])
     res_admin_verify = client.post(
         f"/api/v1/students/parent-links/{unverified_link.id}/verify/"
@@ -190,12 +178,33 @@ def test_parent_self_onboarding_with_national_code_and_unauthorized_protection(
     assert res_admin_verify.status_code == 200
     assert res_admin_verify.data["is_verified"] is True
 
-    # ۴. پس از تأیید کادر آموزشی، شماره دوم هم می‌تواند وارد شود و فقط همان دانش‌آموز را ببیند
+    # ۳. پس از تأیید کادر آموزشی، ولی می‌تواند با OTP وارد شود و توکن بگیرد
     client.force_authenticate(user=None)
-    code3 = generate_and_send_otp("09351112233")
-    res_verify3 = client.post(
+    code2 = generate_and_send_otp("09124445566")
+    res_verify2 = client.post(
         "/api/v1/accounts/auth/parent/otp/verify/",
-        {"phone_number": "09351112233", "code": code3},
+        {"phone_number": "09124445566", "code": code2},
     )
-    assert res_verify3.status_code == 200
-    assert "access" in res_verify3.data
+    assert res_verify2.status_code == 200
+    assert "access" in res_verify2.data
+
+    # ۴. شماره‌ای که از قبل در اکسل یا سیستم تأیید شده (مثلاً student_a2 با شماره 09127778899)
+    parent_pre_user = User.objects.create_user(
+        school=parent_onboarding_setup["school_a"],
+        phone_number="09127778899",
+        role=User.Role.PARENT,
+    )
+    ParentStudentLink.objects.create(
+        school=parent_onboarding_setup["school_a"],
+        parent_user=parent_pre_user,
+        student=parent_onboarding_setup["student_a2"],
+        is_verified=True,
+    )
+
+    code3 = generate_and_send_otp("09127778899")
+    res_pre = client.post(
+        "/api/v1/accounts/auth/parent/otp/verify/",
+        {"phone_number": "09127778899", "code": code3},
+    )
+    assert res_pre.status_code == 200
+    assert "access" in res_pre.data

@@ -353,6 +353,7 @@ def parse_and_validate_rows(
 
     valid_rows = []
     errors = []
+    warnings = []
     seen_national_codes: dict[str, int] = {}
 
     for offset, r in enumerate(rows[header_row_1based:]):
@@ -368,6 +369,9 @@ def parse_and_validate_rows(
         raw_phone = get_val(r, "parent_phone")
         raw_student_code = get_val(r, "student_code")
 
+        original_full = raw_full.strip() if raw_full else f"{raw_first} {raw_last}".strip()
+        original_full = normalize_persian_text(original_full)
+
         if mapping.get("split_full_name") or (raw_full and not (raw_first or raw_last)):
             first_name, last_name = split_persian_full_name(raw_full)
         else:
@@ -381,6 +385,28 @@ def parse_and_validate_rows(
                 first_name = normalize_persian_text(override["first_name"])
             if "last_name" in override:
                 last_name = normalize_persian_text(override["last_name"])
+            if "full_name" in override:
+                original_full = normalize_persian_text(override["full_name"])
+
+        # علامت‌گذاری نام‌های بیش از دو کلمه با هشدار در مرحله پیش‌نمایش
+        name_words_count = len(original_full.split(" ")) if original_full else 0
+        has_multi_word_warning = name_words_count > 2
+        row_warnings = []
+        if has_multi_word_warning:
+            msg = (
+                f"نام «{original_full}» دارای بیش از دو کلمه است؛ تفکیک اولیه به نام: «{first_name}» "
+                f"و نام خانوادگی: «{last_name}» انجام شد. لطفاً در صورت نیاز آن را بازبینی یا اصلاح فرمایید."
+            )
+            row_warnings.append(msg)
+            warnings.append(
+                {
+                    "row_number": excel_row_num,
+                    "student_name": original_full,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "warning": msg,
+                }
+            )
 
         father_name = normalize_persian_text(raw_father)
         student_code = normalize_digits(raw_student_code) or None
@@ -421,7 +447,7 @@ def parse_and_validate_rows(
                 {
                     "row_number": excel_row_num,
                     "raw_data": {
-                        "full_name": raw_full or f"{raw_first} {raw_last}".strip(),
+                        "full_name": original_full or f"{raw_first} {raw_last}".strip(),
                         "father_name": raw_father,
                         "national_code": raw_nc,
                         "parent_phone": raw_phone,
@@ -436,10 +462,14 @@ def parse_and_validate_rows(
                 "row_number": excel_row_num,
                 "first_name": first_name,
                 "last_name": last_name,
+                "full_name": original_full or f"{first_name} {last_name}".strip(),
                 "father_name": father_name,
                 "national_code": national_code,
                 "parent_phone": parent_phone,
                 "student_code": student_code,
+                "has_warning": has_multi_word_warning,
+                "warning": row_warnings[0] if row_warnings else None,
+                "warnings": row_warnings,
             }
         )
 
@@ -508,6 +538,8 @@ def parse_and_validate_rows(
         "total_rows": len(valid_rows) + len(errors),
         "valid_count": len(valid_rows),
         "error_count": len(errors),
+        "warning_count": len(warnings),
+        "warnings": warnings,
         "errors": errors,
         "valid_rows": valid_rows,
         "new_students": new_students,
@@ -556,6 +588,8 @@ def preview_import(
         "total_rows": result["total_rows"],
         "valid_count": result["valid_count"],
         "error_count": result["error_count"],
+        "warning_count": result["warning_count"],
+        "warnings": result["warnings"],
         "errors": result["errors"],
         "new_students": result["new_students"],
         "existing_students": result["existing_students"],
@@ -606,13 +640,15 @@ def commit_import(
 
         for r in valid_rows:
             nc = r["national_code"]
+            full_name = r.get("full_name") or f"{r['first_name']} {r['last_name']}".strip()
             norm_name = build_normalized_search_name(
-                r["first_name"], r["last_name"], r["father_name"]
+                r["first_name"], r["last_name"], r["father_name"], full_name
             )
             if nc in existing_map:
                 st = existing_map[nc]
                 st.first_name = r["first_name"]
                 st.last_name = r["last_name"]
+                st.full_name = full_name
                 st.father_name = r["father_name"]
                 st.normalized_search_name = norm_name
                 if r["student_code"]:
@@ -625,6 +661,7 @@ def commit_import(
                         school=school,
                         first_name=r["first_name"],
                         last_name=r["last_name"],
+                        full_name=full_name,
                         father_name=r["father_name"],
                         national_code=nc,
                         student_code=r["student_code"],
@@ -642,6 +679,7 @@ def commit_import(
                 [
                     "first_name",
                     "last_name",
+                    "full_name",
                     "father_name",
                     "normalized_search_name",
                     "student_code",

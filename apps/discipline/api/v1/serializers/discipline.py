@@ -1,14 +1,19 @@
 from rest_framework import serializers
-from apps.core.fields import JalaliDateField
+from apps.core.fields import JalaliDateField, SchoolScopedPrimaryKeyRelatedField
 from apps.core.models import AuditLog
 from apps.core.normalizers import normalize_persian_text
 from apps.discipline.models import DisciplinaryRecord
+from apps.schools.models import Classroom
+from apps.students.models import Student
 
 
 class DisciplinaryRecordSerializer(serializers.ModelSerializer):
     date = JalaliDateField()
-    classroom = serializers.PrimaryKeyRelatedField(
-        queryset=DisciplinaryRecord._meta.get_field("classroom").related_model.objects.all(),
+    student = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Student.objects.all(),
+    )
+    classroom = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Classroom.objects.all(),
         required=False,
         allow_null=True,
     )

@@ -1,7 +1,9 @@
 from rest_framework import serializers
 
+from apps.core.fields import SchoolScopedPrimaryKeyRelatedField
 from apps.core.normalizers import normalize_persian_text
 from apps.notifications.enums import AnnouncementTargetType, NotificationChannel
+from apps.schools.models import Classroom, Grade
 from apps.notifications.models import (
     Announcement,
     FCMDevice,
@@ -60,6 +62,16 @@ class NotificationDeliverySerializer(serializers.ModelSerializer):
 
 
 class AnnouncementSerializer(serializers.ModelSerializer):
+    target_grade = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Grade.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    target_classroom = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Classroom.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     target_grade_title = serializers.CharField(source="target_grade.title", read_only=True)
     target_classroom_name = serializers.CharField(
         source="target_classroom.name", read_only=True

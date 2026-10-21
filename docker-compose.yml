@@ -24,5 +24,15 @@ services:
       - db
       - redis
 
+  celery:
+    build: .
+    command: celery -A config worker -l info
+    volumes:
+      - .:/app
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+
 volumes:
   postgres_data:

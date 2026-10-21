@@ -214,3 +214,51 @@ def test_parent_inbox_mark_read_and_cross_school_isolation(notifications_setup):
     res_b = client.get("/api/v1/notifications/announcements/")
     assert res_b.status_code == 200
     assert res_b.data["results"] == []
+
+
+@pytest.mark.django_db
+def test_announcement_cross_school_scoping(notifications_setup):
+    """بررسی SchoolScopedPrimaryKeyRelatedField در AnnouncementSerializer برای target_grade و target_classroom."""
+    school_b = notifications_setup["school_b"]
+    grade_b = Grade.objects.create(school=school_b, title="نهم", level_order=9)
+    year_b = AcademicYear.objects.create(
+        school=school_b,
+        title="۱۴۰۴-۱۴۰۵",
+        start_date="2025-09-23",
+        end_date="2026-06-21",
+        is_current=True,
+    )
+    class_b = Classroom.objects.create(
+        school=school_b, academic_year=year_b, grade=grade_b, name="نهم الف"
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=notifications_setup["admin_a"])
+
+    # ۱. تلاش برای ارسال اعلان به پایه مدرسه B
+    res1 = client.post(
+        "/api/v1/notifications/announcements/",
+        {
+            "title": "اعلان غیرمجاز پایه",
+            "body": "تست",
+            "target_type": AnnouncementTargetType.GRADE,
+            "target_grade": grade_b.id,
+        },
+        format="json",
+    )
+    assert res1.status_code == 400
+    assert "target_grade" in res1.data
+
+    # ۲. تلاش برای ارسال اعلان به کلاس مدرسه B
+    res2 = client.post(
+        "/api/v1/notifications/announcements/",
+        {
+            "title": "اعلان غیرمجاز کلاس",
+            "body": "تست",
+            "target_type": AnnouncementTargetType.CLASSROOM,
+            "target_classroom": class_b.id,
+        },
+        format="json",
+    )
+    assert res2.status_code == 400
+    assert "target_classroom" in res2.data

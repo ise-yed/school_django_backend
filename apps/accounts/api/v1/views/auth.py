@@ -104,23 +104,14 @@ class ParentOTPVerifyView(views.APIView):
                     ).first()
 
                     if existing_link is None:
-                        # آیا برای این دانش‌آموز قبلاً ولی تأییدشده‌ی دیگری ثبت شده است؟
-                        has_other_verified_parent = ParentStudentLink.objects.filter(
-                            school=student.school,
-                            student=student,
-                            is_verified=True,
-                        ).exists()
-                        # اگر اولین شماره‌ای است که برای این کد ملی ثبت می‌شود -> مستقیم فعال می‌شود
-                        # اگر قبلاً ولی دیگری ثبت بوده -> نیازمند تأیید کادر آموزشی است
-                        auto_verify = not has_other_verified_parent
+                        # اتصال جدید فقط توسط کادر آموزشی یا اکسل مدرسه تأیید می‌شود؛ ثبت خودکار جدید همواره در انتظار تأیید می‌ماند
                         ParentStudentLink.objects.create(
                             school=student.school,
                             parent_user=parent_user,
                             student=student,
-                            is_verified=auto_verify,
+                            is_verified=False,
                         )
-                        if not auto_verify:
-                            pending_verification_only = True
+                        pending_verification_only = True
                     elif not existing_link.is_verified:
                         pending_verification_only = True
 

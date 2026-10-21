@@ -186,3 +186,21 @@ def test_parent_cannot_use_staff_search_endpoint(search_setup):
     client.force_authenticate(user=search_setup["parent_a"])
     res = client.get("/api/v1/students/search/", {"q": "طهماسبی"})
     assert res.status_code == 403
+
+
+@pytest.mark.django_db
+def test_search_without_pagination(search_setup, monkeypatch):
+    """
+    بررسی اینکه اگر صفحه‌بندی غیرفعال باشد، متد search دچار NameError ناشی از عدم ایمپورت Response نمی‌شود.
+    """
+    from apps.students.api.v1.views.student import StudentViewSet
+
+    monkeypatch.setattr(StudentViewSet, "pagination_class", None)
+
+    client = APIClient()
+    client.force_authenticate(user=search_setup["admin_a"])
+    res = client.get("/api/v1/students/search/", {"q": "طهماسبی"})
+    assert res.status_code == 200
+    assert isinstance(res.data, list)
+    assert len(res.data) >= 1
+    assert res.data[0]["id"] == search_setup["st_tahmasebi"].id

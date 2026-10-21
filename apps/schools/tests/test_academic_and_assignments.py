@@ -178,3 +178,49 @@ def test_cross_school_foreign_key_injection_blocked(school_setup):
     )
     assert res_assign.status_code == 400
     assert "teacher" in res_assign.data
+
+
+@pytest.mark.django_db
+def test_teacher_assignment_day_of_week_crud_and_filter(school_setup):
+    """
+    بررسی ایجاد تخصیص با مشخص کردن روز هفته (day_of_week) و فیلتر کردن آن.
+    """
+    client = APIClient()
+    client.force_authenticate(user=school_setup["admin_a"])
+
+    # ایجاد تخصیص برای شنبه (day_of_week=0) زنگ ۲
+    res_create = client.post(
+        "/api/v1/schools/assignments/",
+        {
+            "teacher": school_setup["teacher_a1"].id,
+            "classroom": school_setup["class_a_alef"].id,
+            "subject_name": "هندسه",
+            "day_of_week": 0,
+            "session_number": 2,
+        },
+    )
+    assert res_create.status_code == 201
+    assert res_create.data["day_of_week"] == 0
+    assert res_create.data["day_of_week_display"] == "شنبه"
+
+    # ایجاد تخصیص برای چهارشنبه (day_of_week=4) زنگ ۱
+    res_create2 = client.post(
+        "/api/v1/schools/assignments/",
+        {
+            "teacher": school_setup["teacher_a1"].id,
+            "classroom": school_setup["class_a_alef"].id,
+            "subject_name": "هندسه",
+            "day_of_week": 4,
+            "session_number": 1,
+        },
+    )
+    assert res_create2.status_code == 201
+    assert res_create2.data["day_of_week"] == 4
+    assert res_create2.data["day_of_week_display"] == "چهارشنبه"
+
+    # فیلتر کردن بر اساس روز هفته شنبه (0)
+    res_filter = client.get("/api/v1/schools/assignments/?day_of_week=0")
+    assert res_filter.status_code == 200
+    items = res_filter.data.get("results", res_filter.data)
+    assert any(it["id"] == res_create.data["id"] for it in items)
+    assert all(it["day_of_week"] == 0 for it in items)

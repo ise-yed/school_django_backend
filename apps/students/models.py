@@ -12,6 +12,9 @@ from apps.students.services import build_normalized_search_name
 class Student(SchoolOwnedModel):
     first_name = models.CharField(max_length=100, verbose_name="نام")
     last_name = models.CharField(max_length=100, verbose_name="نام خانوادگی")
+    full_name = models.CharField(
+        max_length=200, blank=True, default="", verbose_name="نام کامل اصلی"
+    )
     father_name = models.CharField(max_length=100, blank=True, default="", verbose_name="نام پدر")
     national_code = models.CharField(max_length=10, verbose_name="کد ملی")
     student_code = models.CharField(
@@ -45,14 +48,19 @@ class Student(SchoolOwnedModel):
         self.first_name = normalize_persian_text(self.first_name)
         self.last_name = normalize_persian_text(self.last_name)
         self.father_name = normalize_persian_text(self.father_name)
+        if self.full_name:
+            self.full_name = normalize_persian_text(self.full_name)
+        else:
+            self.full_name = f"{self.first_name} {self.last_name}".strip()
         self.national_code = normalize_and_validate_national_code(self.national_code)
         self.normalized_search_name = build_normalized_search_name(
-            self.first_name, self.last_name, self.father_name
+            self.first_name, self.last_name, self.father_name, self.full_name
         )
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.first_name} {self.last_name} ({self.national_code})"
+        display_name = self.full_name or f"{self.first_name} {self.last_name}".strip()
+        return f"{display_name} ({self.national_code})"
 
 
 class Enrollment(SchoolOwnedModel):

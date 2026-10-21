@@ -91,3 +91,74 @@ def test_parent_otp_flow_and_rate_limit(setup_schools):
     assert res_verify.status_code == 200
     assert "access" in res_verify.data
     assert res_verify.data["user"]["school_id"] == setup_schools["school_a"].id
+
+
+@pytest.mark.django_db
+def test_generate_and_send_otp_prints_to_console(capsys):
+    """
+    بررسی اینکه کد OTP تولید شده در کنسول چاپ شده و ارائه‌دهنده پیامک فراخوانی می‌شود.
+    """
+    phone = "09129998877"
+    code = generate_and_send_otp(phone)
+    captured = capsys.readouterr()
+    assert f"[OTP Console Log] Phone: {phone} | Code: {code}" in captured.out
+    assert f"[Console SMS] To: {phone}" in captured.out
+    assert code in captured.out
+
+
+@pytest.mark.django_db
+def test_staff_update_without_password_succeeds_and_preserves_password(setup_schools):
+    """
+    بررسی اینکه هنگام ویرایش با PUT یا PATCH، نیازی به ارسال فیلد password نیست
+    و رمز عبور قبلی کاربر حفظ می‌شود. همچنین هنگام ساخت (POST)، ارسال رمز اجباری است.
+    """
+    client = APIClient()
+    client.force_authenticate(user=setup_schools["admin_a"])
+
+    # ۱. تلاش برای ساخت کادر آموزشی بدون پسورد -> 400
+    res_fail_create = client.post(
+        "/api/v1/accounts/staff/",
+        {
+            "username": "teacher_nopass",
+            "role": User.Role.TEACHER,
+            "first_name": "علی",
+            "last_name": "مرادی",
+        },
+    )
+    assert res_fail_create.status_code == 400
+    assert "password" in res_fail_create.data
+
+    # ۲. ساخت کاربر با پسورد معتبر
+    res_create = client.post(
+        "/api/v1/accounts/staff/",
+        {
+            "username": "teacher_withpass",
+            "password": "initial_password_123",
+            "role": User.Role.TEACHER,
+            "first_name": "علی",
+            "last_name": "مرادی",
+        },
+    )
+    assert res_create.status_code == 201
+    user_id = res_create.data["id"]
+    teacher = User.objects.get(id=user_id)
+    assert teacher.check_password("initial_password_123")
+
+    # ۳. ویرایش با PUT کامل بدون ارسال فیلد password
+    res_put = client.put(
+        f"/api/v1/accounts/staff/{user_id}/",
+        {
+            "username": "teacher_withpass",
+            "first_name": "علیرضا",
+            "last_name": "مرادی‌اصل",
+            "role": User.Role.TEACHER,
+        },
+    )
+    assert res_put.status_code == 200
+    assert res_put.data["first_name"] == "علیرضا"
+    assert res_put.data["last_name"] == "مرادی‌اصل"
+
+    # بررسی اینکه پسورد قبلی کاربر تغییر نکرده و همچنان معتبر است
+    teacher.refresh_from_db()
+    assert teacher.check_password("initial_password_123")
+

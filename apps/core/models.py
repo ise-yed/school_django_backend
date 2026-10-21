@@ -62,6 +62,7 @@ class AuditLog(SchoolOwnedModel):
     class Meta:
         verbose_name = "لاگ تغییرات"
         verbose_name_plural = "لاگ‌های تغییرات"
+        ordering = ["-created_at", "-id"]
         indexes = [
             models.Index(fields=["school", "target_model", "target_id"]),
             models.Index(fields=["school", "created_at"]),

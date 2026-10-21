@@ -3,6 +3,15 @@ from rest_framework.exceptions import PermissionDenied
 from apps.accounts.models import User
 
 
+def get_client_ip(request) -> str | None:
+    if not request:
+        return None
+    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR")
+
+
 class BaseViewSet(viewsets.ModelViewSet):
     """
     پایه‌ی تمام ViewSetهای وابسته به مدرسه:
@@ -13,6 +22,9 @@ class BaseViewSet(viewsets.ModelViewSet):
     """
     teacher_classroom_lookup: str | None = None
     parent_student_lookup: str | None = None
+
+    def get_client_ip(self) -> str | None:
+        return get_client_ip(getattr(self, "request", None))
 
     def get_school(self):
         user = self.request.user

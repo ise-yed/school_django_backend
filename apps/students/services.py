@@ -3,30 +3,20 @@ from django.db.models import F, Q, Value
 from django.db.models.functions import Greatest
 from apps.core.normalizers import normalize_digits, normalize_persian_text
 
-TWO_WORD_FIRST_NAME_PREFIXES = {
-    "سید", "سیده", "سادات", "امیر", "محمد", "فاطمه", "زهرا",
-    "علی", "حسن", "حسین", "غلام", "عبد", "ملک", "نور", "روح", "حاج",
-}
-
-SECOND_PART_FIRST_NAMES = {
-    "رضا", "حسین", "حسن", "علی", "مهدی", "جواد", "باقر", "صادق",
-    "کاظم", "تقی", "نقی", "هادی", "طاها", "یاسین", "عباس", "امیر",
-    "حسام", "عرفان", "متین", "مبین", "صدرا", "کیان", "پارسا", "ماهان",
-    "زهرا", "فاطمه", "سارا", "زینب", "مریم", "معصومه", "نازنین", "هلیا",
-    "الله", "الدین", "الاسلام",
-}
-
-FAMILY_NAME_PREFIXES = {"ابو", "ابن", "آل", "بنی", "میر"}
-
-
-def build_normalized_search_name(first_name: str, last_name: str, father_name: str = "") -> str:
-    combined = f"{first_name or ''} {last_name or ''} {father_name or ''}"
+def build_normalized_search_name(
+    first_name: str, last_name: str, father_name: str = "", full_name: str = ""
+) -> str:
+    combined = f"{first_name or ''} {last_name or ''} {father_name or ''} {full_name or ''}"
     return normalize_persian_text(combined)
 
 
 def split_persian_full_name(full_name: str) -> tuple[str, str]:
     """
-    تقسیم ستون ترکیبی «اسم» به (نام، نام خانوادگی) با تشخیص پیشوندهای دوکلمه‌ای رایج فارسی.
+    تفکیک رشته نام کامل به (نام، نام خانوادگی) بدون اتکا به لیست‌های سخت‌کدشده پیشوند.
+    - در صورت تک‌کلمه‌ای بودن: (کلمه، '')
+    - در صورت دوکلمه‌ای بودن: (کلمه اول، کلمه دوم)
+    - در صورت بیش از دو کلمه بودن: (کلمه اول، باقیمانده به عنوان نام خانوادگی)
+    (توجه: نام‌های با بیش از دو کلمه در پیش‌نمایش ایمپورت اکسل با هشدار علامت‌گذاری می‌شوند تا کاربر تفکیک را بازبینی یا اصلاح کند).
     """
     cleaned = normalize_persian_text(full_name)
     if not cleaned:
@@ -37,22 +27,6 @@ def split_persian_full_name(full_name: str) -> tuple[str, str]:
         return tokens[0], ""
     if len(tokens) == 2:
         return tokens[0], tokens[1]
-
-    if (
-        len(tokens) >= 4
-        and tokens[0] in {"سید", "سیده"}
-        and tokens[1] in TWO_WORD_FIRST_NAME_PREFIXES
-        and tokens[2] in SECOND_PART_FIRST_NAMES
-    ):
-        return " ".join(tokens[:3]), " ".join(tokens[3:])
-
-    if tokens[0] in TWO_WORD_FIRST_NAME_PREFIXES and (
-        tokens[0] in {"سید", "سیده"} or tokens[1] in SECOND_PART_FIRST_NAMES
-    ):
-        return " ".join(tokens[:2]), " ".join(tokens[2:])
-
-    if tokens[1] in FAMILY_NAME_PREFIXES:
-        return tokens[0], " ".join(tokens[1:])
 
     return tokens[0], " ".join(tokens[1:])
 

@@ -135,14 +135,21 @@ def test_three_step_import_analyze_preview_commit_and_idempotency(import_setup):
     assert res_preview.data["error_count"] == 1
     assert res_preview.data["errors"][0]["row_number"] == 5
 
-    # بررسی تفکیک صحیح نام دوکلمه‌ای «سید محمد حسینی» و پر شدن صفر ابتدایی کد ملی
+    # بررسی پیش‌نمایش: نام سه کلمه‌ای «سید محمد حسینی» بدون لیست سخت‌کدشده تفکیک شده و دارای هشدار است
     new_st = res_preview.data["new_students"][0]
-    assert new_st["first_name"] == "سید محمد"
-    assert new_st["last_name"] == "حسینی"
+    assert new_st["first_name"] == "سید"
+    assert new_st["last_name"] == "محمد حسینی"
+    assert new_st["full_name"] == "سید محمد حسینی"
     assert new_st["national_code"] == "0012345679"
+    assert new_st["has_warning"] is True
+    assert res_preview.data["warning_count"] >= 1
+    assert any("سید محمد حسینی" in w["student_name"] for w in res_preview.data["warnings"])
 
-    # بررسی تشخیص نیاز به جابه‌جایی کلاس برای علی محمدی
+    # بررسی تشخیص نیاز به جابه‌جایی کلاس برای علی محمدی (دو کلمه - بدون هشدار)
     existing_st = res_preview.data["existing_students"][0]
+    assert existing_st["first_name"] == "علی"
+    assert existing_st["last_name"] == "محمدی"
+    assert existing_st["has_warning"] is False
     assert existing_st["requires_classroom_transfer"] is True
     assert existing_st["previous_classroom_name"] == "هفتم ب"
 
@@ -151,7 +158,7 @@ def test_three_step_import_analyze_preview_commit_and_idempotency(import_setup):
     assert len(missing_list) == 1
     assert missing_list[0]["national_code"] == "0034567895"
 
-    # ۳. مرحله Commit (ابتدا بدون اجازه جابه‌جایی کلاس: allow_classroom_transfer=False)
+    # ۳. مرحله Commit (همراه با اصلاح دستی تفکیک نام سید محمد حسینی با row_overrides و بدون اجازه جابه‌جایی کلاس)
     res_commit_no_transfer = client.post(
         "/api/v1/imports/commit/",
         {
@@ -160,6 +167,9 @@ def test_three_step_import_analyze_preview_commit_and_idempotency(import_setup):
             "mapping": mapping,
             "allow_classroom_transfer": False,
             "save_mapping": True,
+            "row_overrides": {
+                "3": {"first_name": "سید محمد", "last_name": "حسینی"}
+            },
         },
         format="json",
     )
@@ -172,10 +182,15 @@ def test_three_step_import_analyze_preview_commit_and_idempotency(import_setup):
     enr_transfer = Enrollment.objects.get(student=import_setup["transfer_student"])
     assert enr_transfer.classroom_id == import_setup["class_be"].id
 
-    # بررسی ساخته شدن خودکار حساب ولی و ParentStudentLink برای ردیف دارای موبایل ولی
+    # بررسی ذخیره شدن full_name اصلی و نام/نام‌خانوادگی اصلاح‌شده روی مدل Student
     created_student = Student.objects.get(
         school=import_setup["school"], national_code="0012345679"
     )
+    assert created_student.full_name == "سید محمد حسینی"
+    assert created_student.first_name == "سید محمد"
+    assert created_student.last_name == "حسینی"
+
+    # بررسی ساخته شدن خودکار حساب ولی و ParentStudentLink برای ردیف دارای موبایل ولی
     assert ParentStudentLink.objects.filter(
         school=import_setup["school"],
         student=created_student,

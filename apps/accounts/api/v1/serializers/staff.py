@@ -4,7 +4,7 @@ from apps.core.normalizers import normalize_phone
 
 
 class SchoolStaffSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=True, min_length=6)
+    password = serializers.CharField(write_only=True, required=False, min_length=6)
 
     class Meta:
         model = User
@@ -33,10 +33,16 @@ class SchoolStaffSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("از این بخش فقط می‌توانید کادر آموزشی یا معلم تعریف کنید.")
         return value
 
+    def validate(self, attrs):
+        if not self.instance and not attrs.get("password"):
+            raise serializers.ValidationError({"password": "رمز عبور برای ایجاد کاربر الزامی است."})
+        return attrs
+
     def create(self, validated_data):
-        password = validated_data.pop("password")
+        password = validated_data.pop("password", None)
         user = User(**validated_data)
-        user.set_password(password)
+        if password:
+            user.set_password(password)
         user.save()
         return user
 

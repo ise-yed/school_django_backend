@@ -266,3 +266,60 @@ def test_parent_read_only_own_child_and_cross_school_isolation(discipline_setup)
     assert client.get("/api/v1/discipline/").data["results"] == []
     assert client.get(f"/api/v1/discipline/{rec1_id}/").status_code == 404
     assert client.get("/api/v1/discipline/audit-logs/").data["results"] == []
+
+
+@pytest.mark.django_db
+def test_disciplinary_record_cross_school_scoping(discipline_setup):
+    """بررسی SchoolScopedPrimaryKeyRelatedField در سریالایزر انضباطی برای دانش‌آموز و کلاس."""
+    school_b = discipline_setup["school_b"]
+    st_b = Student.objects.create(
+        school=school_b,
+        first_name="مانی",
+        last_name="شمس",
+        father_name="سعید",
+        national_code="0079075614",
+    )
+    grade_b = Grade.objects.create(school=school_b, title="هشتم", level_order=8)
+    year_b = AcademicYear.objects.create(
+        school=school_b,
+        title="۱۴۰۴-۱۴۰۵",
+        start_date="2025-09-23",
+        end_date="2026-06-21",
+        is_current=True,
+    )
+    class_b = Classroom.objects.create(
+        school=school_b, academic_year=year_b, grade=grade_b, name="هشتم الف"
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=discipline_setup["admin_a"])
+
+    # ۱. تلاش برای ارجاع به دانش‌آموز مدرسه B
+    res_st = client.post(
+        "/api/v1/discipline/",
+        {
+            "student": st_b.id,
+            "classroom": discipline_setup["class_a1"].id,
+            "date": "1404-07-25",
+            "category": "BEHAVIORAL",
+            "description": "تلاش غیرمجاز با دانش‌آموز مدرسه دیگر",
+        },
+        format="json",
+    )
+    assert res_st.status_code == 400
+    assert "student" in res_st.data
+
+    # ۲. تلاش برای ارجاع به کلاس مدرسه B
+    res_cl = client.post(
+        "/api/v1/discipline/",
+        {
+            "student": discipline_setup["st1"].id,
+            "classroom": class_b.id,
+            "date": "1404-07-25",
+            "category": "BEHAVIORAL",
+            "description": "تلاش غیرمجاز با کلاس مدرسه دیگر",
+        },
+        format="json",
+    )
+    assert res_cl.status_code == 400
+    assert "classroom" in res_cl.data

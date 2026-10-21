@@ -1,8 +1,10 @@
 from rest_framework import serializers
+from apps.core.fields import SchoolScopedPrimaryKeyRelatedField
 from apps.core.normalizers import (
     normalize_and_validate_national_code,
     normalize_persian_text,
 )
+from apps.schools.models import Classroom
 from apps.students.models import Enrollment, Student
 
 
@@ -17,6 +19,7 @@ class StudentSerializer(serializers.ModelSerializer):
             "id",
             "first_name",
             "last_name",
+            "full_name",
             "father_name",
             "national_code",
             "student_code",
@@ -102,10 +105,16 @@ class StudentSearchResultSerializer(StudentSerializer):
         ]
 
     def get_full_name(self, obj) -> str:
-        return f"{obj.first_name} {obj.last_name}".strip()
+        return obj.full_name or f"{obj.first_name} {obj.last_name}".strip()
 
 
 class EnrollmentSerializer(serializers.ModelSerializer):
+    student = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Student.objects.all(),
+    )
+    classroom = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Classroom.objects.all(),
+    )
     student_full_name = serializers.SerializerMethodField()
     student_national_code = serializers.CharField(source="student.national_code", read_only=True)
     father_name = serializers.CharField(source="student.father_name", read_only=True)

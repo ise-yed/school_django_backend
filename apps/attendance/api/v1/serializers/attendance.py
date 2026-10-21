@@ -1,11 +1,18 @@
 from rest_framework import serializers
 from apps.attendance.models import AttendanceRecord
-from apps.core.fields import JalaliDateField
+from apps.core.fields import JalaliDateField, SchoolScopedPrimaryKeyRelatedField
 from apps.schools.models import Classroom
+from apps.students.models import Enrollment, Student
 
 
 class AttendanceRecordSerializer(serializers.ModelSerializer):
     date = JalaliDateField()
+    student = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Student.objects.all(),
+    )
+    classroom = SchoolScopedPrimaryKeyRelatedField(
+        queryset=Classroom.objects.all(),
+    )
     student_full_name = serializers.SerializerMethodField()
     father_name = serializers.CharField(source="student.father_name", read_only=True)
     national_code = serializers.CharField(source="student.national_code", read_only=True)
@@ -41,6 +48,54 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
             return None
         full = f"{obj.recorded_by.first_name} {obj.recorded_by.last_name}".strip()
         return full or obj.recorded_by.username
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        school = getattr(request.user, "school", None) if (request and hasattr(request, "user")) else None
+
+        student = attrs.get("student", getattr(self.instance, "student", None))
+        classroom = attrs.get("classroom", getattr(self.instance, "classroom", None))
+
+        if school:
+            if student and student.school_id != school.id:
+                raise serializers.ValidationError(
+                    {"student": "دانش‌آموز انتخاب‌شده متعلق به مدرسه‌ی شما نیست."}
+                )
+            if classroom and classroom.school_id != school.id:
+                raise serializers.ValidationError(
+                    {"classroom": "کلاس انتخاب‌شده متعلق به مدرسه‌ی شما نیست."}
+                )
+
+        if student and classroom:
+            is_enrolled = Enrollment.objects.filter(
+                student=student,
+                classroom=classroom,
+                is_active=True,
+            ).exists()
+            if not is_enrolled:
+                raise serializers.ValidationError(
+                    {"student": "دانش‌آموز انتخاب‌شده در این کلاس ثبت‌نام نشده است."}
+                )
+
+        date = attrs.get("date", getattr(self.instance, "date", None))
+        session_number = attrs.get(
+            "session_number", getattr(self.instance, "session_number", 0)
+        )
+        if school and student and date is not None:
+            existing_qs = AttendanceRecord.objects.filter(
+                school=school,
+                student=student,
+                date=date,
+                session_number=session_number,
+            )
+            if self.instance:
+                existing_qs = existing_qs.exclude(pk=self.instance.pk)
+            if existing_qs.exists():
+                raise serializers.ValidationError(
+                    "رکورد حضور و غیاب برای این دانش‌آموز در این تاریخ و شماره زنگ قبلاً ثبت شده است."
+                )
+
+        return attrs
 
 
 class BulkAttendanceItemSerializer(serializers.Serializer):
