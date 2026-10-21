@@ -35,11 +35,15 @@ class DisciplineAccessPermission(IsTeacherOrSchoolAdmin):
         return IsParentReadOnly().has_permission(request, view)
 
 
+from apps.discipline.api.v1.filters import DisciplinaryRecordFilter
+
+
 class DisciplinaryRecordViewSet(BaseViewSet):
     queryset = DisciplinaryRecord.objects.select_related(
         "student", "classroom", "created_by", "updated_by"
     )
     serializer_class = DisciplinaryRecordSerializer
+    filterset_class = DisciplinaryRecordFilter
     permission_classes = [DisciplineAccessPermission]
     teacher_classroom_lookup = "classroom__teacher_assignments__teacher"
     parent_student_lookup = "student__parent_links__parent_user"
@@ -47,30 +51,12 @@ class DisciplinaryRecordViewSet(BaseViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        params = self.request.query_params
 
         if user.role == User.Role.PARENT:
             qs = qs.filter(
                 student__parent_links__parent_user=user,
                 student__parent_links__is_verified=True,
             )
-
-        student_id = params.get("student")
-        if student_id:
-            qs = qs.filter(student_id=student_id)
-
-        classroom_id = params.get("classroom")
-        if classroom_id:
-            qs = qs.filter(classroom_id=classroom_id)
-
-        category = params.get("category")
-        if category:
-            qs = qs.filter(category=category)
-
-        raw_date = params.get("date")
-        if raw_date:
-            greg_date = JalaliDateField().to_internal_value(raw_date)
-            qs = qs.filter(date=greg_date)
 
         return qs.distinct()
 

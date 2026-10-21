@@ -224,3 +224,37 @@ def test_teacher_assignment_day_of_week_crud_and_filter(school_setup):
     items = res_filter.data.get("results", res_filter.data)
     assert any(it["id"] == res_create.data["id"] for it in items)
     assert all(it["day_of_week"] == 0 for it in items)
+
+
+@pytest.mark.django_db
+def test_classroom_delete_is_blocked_and_is_active_supported(school_setup):
+    """
+    بررسی اینکه متد DELETE برای کلاس مسدود است (405) و غیرفعال‌سازی با PATCH انجام می‌شود
+    و متد delete() مدل نیز soft-delete انجام می‌دهد تا سوابق حضور و غیاب پاک نشوند.
+    """
+    classroom = school_setup["class_a_alef"]
+    admin_a = school_setup["admin_a"]
+
+    client = APIClient()
+    client.force_authenticate(user=admin_a)
+
+    # ۱. متد DELETE در API برای کلاس مسدود است
+    res_del = client.delete(f"/api/v1/schools/classrooms/{classroom.id}/")
+    assert res_del.status_code == 405
+
+    # ۲. غیرفعال‌سازی از طریق PATCH
+    res_patch = client.patch(
+        f"/api/v1/schools/classrooms/{classroom.id}/",
+        {"is_active": False},
+        format="json",
+    )
+    assert res_patch.status_code == 200
+    classroom.refresh_from_db()
+    assert classroom.is_active is False
+
+    # ۳. متد .delete() در سطح مدل پایتون
+    classroom.is_active = True
+    classroom.save()
+    classroom.delete()
+    classroom.refresh_from_db()
+    assert classroom.is_active is False

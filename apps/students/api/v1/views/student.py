@@ -13,6 +13,7 @@ from apps.students.api.v1.serializers.student import (
     StudentSearchResultSerializer,
     StudentSerializer,
 )
+from apps.students.api.v1.filters import EnrollmentFilter, StudentFilter
 from apps.students.models import Enrollment, Student
 from apps.students.services import apply_student_search_and_filters
 
@@ -32,17 +33,41 @@ class StudentAccessPermission(IsSchoolAdminOrTeacherReadOnly):
 class StudentViewSet(BaseViewSet):
     queryset = Student.objects.all()
     serializer_class = StudentSerializer
+    filterset_class = StudentFilter
     permission_classes = [StudentAccessPermission]
-    teacher_classroom_lookup = "enrollments__classroom__teacher_assignments__teacher"
-    parent_student_lookup = "parent_links__parent_user"
+    teacher_classroom_lookup = None
+    parent_student_lookup = None
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
 
-        # اگر ولی است، فقط فرزندان تأییدشده‌ی خودش را ببیند
-        if user.role == User.Role.PARENT:
-            qs = qs.filter(parent_links__parent_user=user, parent_links__is_verified=True)
+        # دسترسی معلم: فقط دانش‌آموزان فعال با ثبت‌نام فعال در کلاس‌های تخصیص‌یافته به معلم در سال تحصیلی جاری
+        if user.role == User.Role.TEACHER:
+            qs = qs.filter(
+                is_active=True,
+                enrollments__classroom__teacher_assignments__teacher=user,
+                enrollments__is_active=True,
+                enrollments__academic_year__is_current=True,
+                enrollments__classroom__is_active=True,
+            )
+
+        # دسترسی ولی: فقط فرزندان فعال و تأییدشده‌ی خودش
+        elif user.role == User.Role.PARENT:
+            qs = qs.filter(
+                is_active=True,
+                parent_links__parent_user=user,
+                parent_links__is_verified=True,
+            )
+
+        # فیلتر وضعیت فعال/غیرفعال برای ادمین مدرسه
+        is_active_param = self.request.query_params.get("is_active")
+        if is_active_param is not None:
+            if is_active_param.lower() in ("true", "1"):
+                qs = qs.filter(is_active=True)
+            elif is_active_param.lower() in ("false", "0"):
+                qs = qs.filter(is_active=False)
 
         # اعمال فیلترهای جستجو و pg_trgm
         qs = apply_student_search_and_filters(qs, self.request.query_params)
@@ -91,15 +116,19 @@ class StudentViewSet(BaseViewSet):
 class EnrollmentViewSet(BaseViewSet):
     queryset = Enrollment.objects.select_related("student", "classroom", "academic_year")
     serializer_class = EnrollmentSerializer
+    filterset_class = EnrollmentFilter
     permission_classes = [IsSchoolAdminOrTeacherReadOnly]
-    teacher_classroom_lookup = "classroom__teacher_assignments__teacher"
+    teacher_classroom_lookup = None
 
     def get_queryset(self):
         qs = super().get_queryset()
-        classroom_id = self.request.query_params.get("classroom")
-        academic_year_id = self.request.query_params.get("academic_year")
-        if classroom_id:
-            qs = qs.filter(classroom_id=classroom_id)
-        if academic_year_id:
-            qs = qs.filter(academic_year_id=academic_year_id)
+        user = self.request.user
+        if user.role == User.Role.TEACHER:
+            qs = qs.filter(
+                classroom__teacher_assignments__teacher=user,
+                is_active=True,
+                academic_year__is_current=True,
+                student__is_active=True,
+                classroom__is_active=True,
+            )
         return qs

@@ -207,4 +207,78 @@ def test_parent_self_onboarding_with_national_code_and_unauthorized_protection(
         {"phone_number": "09127778899", "code": code3},
     )
     assert res_pre.status_code == 200
-    assert "access" in res_pre.data
+    assert "access" in res_pre.data
+
+
+@pytest.mark.django_db
+def test_parent_and_teacher_same_phone_coexistence(parent_onboarding_setup):
+    """
+    بررسی اینکه اگر شماره موبایل یک ولی با شماره یک معلم در یک مدرسه یکسان باشد:
+    ۱. رکورد معلم بازنویسی یا مخدوش نشود (نام و نقش حفظ شود).
+    ۲. رکورد جداگانه با نقش PARENT ایجاد شود.
+    ۳. ParentStudentLink به کاربر ولی متصل شود نه کاربر معلم.
+    ۴. ولی بتواند با OTP لاگین کند و توکن دریافت کند.
+    """
+    client = APIClient()
+    school_a = parent_onboarding_setup["school_a"]
+    admin_a = parent_onboarding_setup["admin_a"]
+    student_a1 = parent_onboarding_setup["student_a1"]
+
+    # معلمی با این شماره در مدرسه A ثبت است
+    shared_phone = "09125556677"
+    teacher = User.objects.create_user(
+        username="teacher_alborz",
+        phone_number=shared_phone,
+        first_name="محمد",
+        last_name="استاد",
+        school=school_a,
+        role=User.Role.TEACHER,
+    )
+
+    # ادمین مدرسه ولی دانش‌آموز را با همان شماره موبایل ثبت می‌کند
+    client.force_authenticate(user=admin_a)
+    res_assign = client.post(
+        "/api/v1/students/parent-links/",
+        {
+            "student_national_code": student_a1.national_code,
+            "phone_number": shared_phone,
+            "relation": "FATHER",
+        },
+    )
+    assert res_assign.status_code == 201
+
+    # بازخوانی معلم از دیتابیس: نام و نقش نباید تغییر کرده باشد
+    teacher.refresh_from_db()
+    assert teacher.role == User.Role.TEACHER
+    assert teacher.first_name == "محمد"
+    assert teacher.last_name == "استاد"
+
+    # کاربر ولی جداگانه‌ای ساخته شده است
+    parent_user = User.objects.get(
+        school=school_a,
+        phone_number=shared_phone,
+        role=User.Role.PARENT,
+    )
+    assert parent_user.id != teacher.id
+    assert parent_user.role == User.Role.PARENT
+
+    # پیوند به ولی متصل است نه معلم
+    link = ParentStudentLink.objects.get(student=student_a1, school=school_a)
+    assert link.parent_user_id == parent_user.id
+    assert link.parent_user_id != teacher.id
+
+    # ورود ولی با OTP و بررسی توکن
+    client.force_authenticate(user=None)
+    res_req = client.post(
+        "/api/v1/accounts/auth/parent/otp/request/",
+        {"phone_number": shared_phone},
+    )
+    assert res_req.status_code == 200
+
+    otp_code = generate_and_send_otp(shared_phone)
+    res_ver = client.post(
+        "/api/v1/accounts/auth/parent/otp/verify/",
+        {"phone_number": shared_phone, "code": otp_code},
+    )
+    assert res_ver.status_code == 200
+    assert "access" in res_ver.data

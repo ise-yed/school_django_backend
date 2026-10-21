@@ -17,6 +17,11 @@ class School(TimeStampedModel):
     def __str__(self):
         return f"{self.name} ({self.code})"
 
+    def delete(self, using=None, keep_parents=False):
+        self.is_active = False
+        self.save(update_fields=["is_active"])
+        return 1, {self._meta.label: 1}
+
 
 class AcademicYear(SchoolOwnedModel):
     title = models.CharField(max_length=50, verbose_name="عنوان سال تحصیلی")
@@ -85,6 +90,7 @@ class Classroom(SchoolOwnedModel):
         verbose_name="پایه تحصیلی",
     )
     name = models.CharField(max_length=100, verbose_name="نام کلاس")
+    is_active = models.BooleanField(default=True, verbose_name="فعال")
 
     class Meta:
         verbose_name = "کلاس"
@@ -96,6 +102,14 @@ class Classroom(SchoolOwnedModel):
                 name="uq_classroom_school_year_grade_name",
             )
         ]
+        indexes = [
+            models.Index(fields=["school", "is_active"]),
+        ]
+
+    def delete(self, using=None, keep_parents=False):
+        self.is_active = False
+        self.save(update_fields=["is_active"])
+        return 1, {self._meta.label: 1}
 
     def __str__(self):
         return f"{self.grade.title} - {self.name}"

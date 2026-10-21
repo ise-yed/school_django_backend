@@ -91,11 +91,14 @@ def resolve_target_parent_links(school, announcement: Announcement):
         qs = qs.filter(
             student__enrollments__classroom_id=announcement.target_classroom_id,
             student__enrollments__is_active=True,
+            student__enrollments__classroom__is_active=True,
         )
     elif announcement.target_type == AnnouncementTargetType.GRADE:
         qs = qs.filter(
             student__enrollments__classroom__grade_id=announcement.target_grade_id,
+            student__enrollments__academic_year__is_current=True,
             student__enrollments__is_active=True,
+            student__enrollments__classroom__is_active=True,
         )
 
     return qs.distinct()

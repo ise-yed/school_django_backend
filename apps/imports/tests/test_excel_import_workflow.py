@@ -135,10 +135,10 @@ def test_three_step_import_analyze_preview_commit_and_idempotency(import_setup):
     assert res_preview.data["error_count"] == 1
     assert res_preview.data["errors"][0]["row_number"] == 5
 
-    # بررسی پیش‌نمایش: نام سه کلمه‌ای «سید محمد حسینی» بدون لیست سخت‌کدشده تفکیک شده و دارای هشدار است
+    # بررسی پیش‌نمایش: نام سه کلمه‌ای «سید محمد حسینی» با قاعده کلمه آخر = فامیل تفکیک شده و دارای هشدار است
     new_st = res_preview.data["new_students"][0]
-    assert new_st["first_name"] == "سید"
-    assert new_st["last_name"] == "محمد حسینی"
+    assert new_st["first_name"] == "سید محمد"
+    assert new_st["last_name"] == "حسینی"
     assert new_st["full_name"] == "سید محمد حسینی"
     assert new_st["national_code"] == "0012345679"
     assert new_st["has_warning"] is True

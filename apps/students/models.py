@@ -62,6 +62,11 @@ class Student(SchoolOwnedModel):
         display_name = self.full_name or f"{self.first_name} {self.last_name}".strip()
         return f"{display_name} ({self.national_code})"
 
+    def delete(self, using=None, keep_parents=False):
+        self.is_active = False
+        self.save(update_fields=["is_active"])
+        return 1, {self._meta.label: 1}
+
 
 class Enrollment(SchoolOwnedModel):
     student = models.ForeignKey(

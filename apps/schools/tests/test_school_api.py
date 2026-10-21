@@ -31,3 +31,33 @@ def test_superuser_can_create_school_and_admin():
     )
     assert res_admin.status_code == 201
     assert res_admin.data["school_id"] == school_id
+
+
+@pytest.mark.django_db
+def test_school_delete_is_blocked_and_soft_delete_supported():
+    """
+    بررسی اینکه متد DELETE برای مدرسه در API مسدود است (405)
+    و غیرفعال‌سازی با PATCH is_active=False انجام می‌شود و متد .delete() پایتون هم soft-delete می‌کند.
+    """
+    superuser = User.objects.create_superuser(username="superadmin", password="superpassword")
+    school = School.objects.create(name="مدرسه تست", code="test-school")
+
+    client = APIClient()
+    client.force_authenticate(user=superuser)
+
+    # ۱. متد DELETE در API مسدود است
+    res_del = client.delete(f"/api/v1/schools/manage/{school.id}/")
+    assert res_del.status_code == 405
+
+    # ۲. غیرفعال‌سازی با PATCH انجام می‌شود
+    res_patch = client.patch(f"/api/v1/schools/manage/{school.id}/", {"is_active": False})
+    assert res_patch.status_code == 200
+    school.refresh_from_db()
+    assert school.is_active is False
+
+    # ۳. متد .delete() در سطح مدل پایتون رکورد را پاک فیزیکی نمی‌کند بلکه غیرفعال می‌کند
+    school.is_active = True
+    school.save()
+    school.delete()
+    school.refresh_from_db()
+    assert school.is_active is False

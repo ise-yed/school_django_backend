@@ -105,8 +105,8 @@ class AssignParentByAdminSerializer(serializers.Serializer):
             parent_user, _ = User.objects.get_or_create(
                 school=school,
                 phone_number=phone,
+                role=User.Role.PARENT,
                 defaults={
-                    "role": User.Role.PARENT,
                     "first_name": first_name or student.father_name,
                     "last_name": last_name or student.last_name,
                     "is_active": True,

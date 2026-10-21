@@ -65,9 +65,9 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
         ordering = ["id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["school", "phone_number"],
+                fields=["school", "phone_number", "role"],
                 condition=models.Q(phone_number__isnull=False),
-                name="uq_user_school_phone",
+                name="uq_user_school_phone_role",
             )
         ]
 

@@ -1,5 +1,6 @@
 from apps.core.permissions import IsSchoolAdminOrTeacherReadOnly
 from apps.core.viewsets import BaseViewSet
+from apps.schools.api.v1.filters import ClassroomFilter
 from apps.schools.api.v1.serializers.academic import (
     AcademicYearSerializer,
     ClassroomSerializer,
@@ -24,18 +25,11 @@ class ClassroomViewSet(BaseViewSet):
     """
     ادمین مدرسه همه‌ی کلاس‌های مدرسه را می‌بیند و مدیریت می‌کند.
     معلم فقط کلاس‌هایی را می‌بیند که در TeacherAssignment به او تخصیص داده شده‌اند.
+    حذف فیزیکی (DELETE) به دلیل حفظ سوابق مسدود شده و غیرفعال‌سازی با is_active انجام می‌شود.
     """
     queryset = Classroom.objects.select_related("academic_year", "grade")
     serializer_class = ClassroomSerializer
+    filterset_class = ClassroomFilter
     permission_classes = [IsSchoolAdminOrTeacherReadOnly]
     teacher_classroom_lookup = "teacher_assignments__teacher"
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        academic_year_id = self.request.query_params.get("academic_year")
-        grade_id = self.request.query_params.get("grade")
-        if academic_year_id:
-            qs = qs.filter(academic_year_id=academic_year_id)
-        if grade_id:
-            qs = qs.filter(grade_id=grade_id)
-        return qs
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]

@@ -1,34 +1,37 @@
 from django.contrib.postgres.search import TrigramSimilarity, TrigramWordSimilarity
 from django.db.models import F, Q, Value
 from django.db.models.functions import Greatest
-from apps.core.normalizers import normalize_digits, normalize_persian_text
+from apps.core.normalizers import (
+    normalize_digits,
+    normalize_for_search,
+    normalize_persian_text,
+)
 
 def build_normalized_search_name(
     first_name: str, last_name: str, father_name: str = "", full_name: str = ""
 ) -> str:
     combined = f"{first_name or ''} {last_name or ''} {father_name or ''} {full_name or ''}"
-    return normalize_persian_text(combined)
+    return normalize_for_search(combined)
 
 
 def split_persian_full_name(full_name: str) -> tuple[str, str]:
     """
-    تفکیک رشته نام کامل به (نام، نام خانوادگی) بدون اتکا به لیست‌های سخت‌کدشده پیشوند.
+    تفکیک رشته نام کامل به (نام، نام خانوادگی) بر اساس قاعده «کلمه آخر = نام خانوادگی»:
     - در صورت تک‌کلمه‌ای بودن: (کلمه، '')
-    - در صورت دوکلمه‌ای بودن: (کلمه اول، کلمه دوم)
-    - در صورت بیش از دو کلمه بودن: (کلمه اول، باقیمانده به عنوان نام خانوادگی)
+    - در صورت دو یا چندکلمه‌ای بودن: (تمام کلمات ابتدایی به عنوان نام، کلمه آخر به عنوان نام خانوادگی)
     (توجه: نام‌های با بیش از دو کلمه در پیش‌نمایش ایمپورت اکسل با هشدار علامت‌گذاری می‌شوند تا کاربر تفکیک را بازبینی یا اصلاح کند).
     """
     cleaned = normalize_persian_text(full_name)
     if not cleaned:
         return "", ""
 
-    tokens = cleaned.split(" ")
+    tokens = [t for t in cleaned.split(" ") if t]
+    if not tokens:
+        return "", ""
     if len(tokens) == 1:
         return tokens[0], ""
-    if len(tokens) == 2:
-        return tokens[0], tokens[1]
 
-    return tokens[0], " ".join(tokens[1:])
+    return " ".join(tokens[:-1]), tokens[-1]
 
 
 def apply_student_search_and_filters(queryset, params: dict, similarity_threshold: float = 0.25):
@@ -41,10 +44,14 @@ def apply_student_search_and_filters(queryset, params: dict, similarity_threshol
     """
     classroom_id = params.get("classroom")
     if classroom_id:
-        queryset = queryset.filter(
-            enrollments__classroom_id=classroom_id,
-            enrollments__is_active=True,
-        )
+        try:
+            c_val = int(classroom_id)
+            queryset = queryset.filter(
+                enrollments__classroom_id=c_val,
+                enrollments__is_active=True,
+            )
+        except (ValueError, TypeError):
+            pass
 
     national_code = normalize_digits(params.get("national_code", ""))
     if national_code:
@@ -78,7 +85,7 @@ def apply_student_search_and_filters(queryset, params: dict, similarity_threshol
                 | Q(student_code__icontains=norm_digits)
             )
         else:
-            norm_q = normalize_persian_text(raw_q)
+            norm_q = normalize_for_search(raw_q)
             queryset = (
                 queryset.annotate(
                     similarity=Greatest(

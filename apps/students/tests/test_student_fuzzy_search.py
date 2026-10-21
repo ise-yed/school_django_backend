@@ -203,4 +203,59 @@ def test_search_without_pagination(search_setup, monkeypatch):
     assert res.status_code == 200
     assert isinstance(res.data, list)
     assert len(res.data) >= 1
-    assert res.data[0]["id"] == search_setup["st_tahmasebi"].id
+    assert res.data[0]["id"] == search_setup["st_tahmasebi"].id
+
+
+@pytest.mark.django_db
+def test_persian_letters_and_half_space_preserved_in_storage_and_matched_in_search(search_setup):
+    """
+    بررسی اینکه نام‌های فارسی شامل «آ» و نیم‌فاصله (\u200c) دقیقاً در پایگاه‌داده ذخیره می‌شوند،
+    ولی در ایندکس و جستجو، هر دو حالت باکلاه و بی‌کلاه، با نیم‌فاصله و بدون نیم‌فاصله پیدا می‌شوند.
+    """
+    school_a = search_setup["school_a"]
+    st = Student.objects.create(
+        school=school_a,
+        first_name="آزاده",
+        last_name="کریمی\u200cراد",
+        full_name="آزاده کریمی\u200cراد",
+        father_name="فرزاد",
+        national_code="0079075614",
+    )
+    # ۱. نام در دیتابیس دست‌نخورده باقی مانده است
+    assert st.first_name == "آزاده"
+    assert st.last_name == "کریمی\u200cراد"
+    assert st.full_name == "آزاده کریمی\u200cراد"
+    assert "\u200c" in st.last_name
+    assert "آ" in st.first_name
+
+    # ۲. normalized_search_name به شکل تهاجمی نرمال شده است
+    assert "ازاده" in st.normalized_search_name
+    assert "کریمی راد" in st.normalized_search_name
+
+    client = APIClient()
+    client.force_authenticate(user=search_setup["admin_a"])
+
+    # ۳. جستجو با «آزاده» (با کلاه)
+    res_with_hat = client.get("/api/v1/students/search/", {"q": "آزاده"})
+    assert res_with_hat.status_code == 200
+    ids_hat = [r["id"] for r in res_with_hat.data["results"]]
+    assert st.id in ids_hat
+    assert res_with_hat.data["results"][0]["first_name"] == "آزاده"
+
+    # ۴. جستجو با «ازاده» (بی‌کلاه)
+    res_no_hat = client.get("/api/v1/students/search/", {"q": "ازاده"})
+    assert res_no_hat.status_code == 200
+    ids_no_hat = [r["id"] for r in res_no_hat.data["results"]]
+    assert st.id in ids_no_hat
+
+    # ۵. جستجو با فاصله معمولی به جای نیم‌فاصله («کریمی راد»)
+    res_space = client.get("/api/v1/students/search/", {"q": "کریمی راد"})
+    assert res_space.status_code == 200
+    ids_space = [r["id"] for r in res_space.data["results"]]
+    assert st.id in ids_space
+
+    # ۶. جستجو با نیم‌فاصله («کریمی‌راد»)
+    res_zwnj = client.get("/api/v1/students/search/", {"q": "کریمی\u200cراد"})
+    assert res_zwnj.status_code == 200
+    ids_zwnj = [r["id"] for r in res_zwnj.data["results"]]
+    assert st.id in ids_zwnj

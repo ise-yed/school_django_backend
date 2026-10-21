@@ -756,4 +756,45 @@ def test_attendance_audit_log_recorded_on_create_update_and_bulk(attendance_setu
     res_admin_logs = client.get("/api/v1/attendance/audit-logs/")
     assert res_admin_logs.status_code == 200
     assert len(res_admin_logs.data["results"]) >= 3
+
+
+@pytest.mark.django_db
+def test_single_attendance_atomic_transaction_rollback(attendance_setup):
+    """
+    بررسی اینکه در ثبت تکی حضور، ایجاد رکورد و AuditLog داخل یک transaction.atomic هستند؛
+    در صورت بروز خطا در ثبت لاگ، رکورد حضور و غیاب نیز Rollback شده و ذخیره نمی‌شود.
+    """
+    from unittest.mock import patch
+    from rest_framework.test import APIRequestFactory, force_authenticate
+    from apps.attendance.api.v1.views.attendance import AttendanceRecordViewSet
+
+    factory = APIRequestFactory()
+    teacher = attendance_setup["teacher_a1"]
+    class1 = attendance_setup["class_a1"]
+    st1 = attendance_setup["st1"]
+
+    initial_attendance_count = AttendanceRecord.objects.count()
+    initial_audit_count = AuditLog.objects.count()
+
+    request = factory.post(
+        "/api/v1/attendance/",
+        {
+            "classroom": class1.id,
+            "student": st1.id,
+            "date": "1404-07-22",
+            "session_number": 1,
+            "status": "PRESENT",
+        },
+        format="json",
+    )
+    force_authenticate(request, user=teacher)
+    view = AttendanceRecordViewSet.as_view({"post": "create"})
+
+    with pytest.raises(RuntimeError):
+        with patch("apps.core.models.AuditLog.objects.create", side_effect=RuntimeError("AuditLog DB failure")):
+            view(request)
+
+    # به دلیل atomic بودن تراکنش، رکورد حضور باید رول‌بک شده باشد
+    assert AttendanceRecord.objects.count() == initial_attendance_count
+    assert AuditLog.objects.count() == initial_audit_count
 

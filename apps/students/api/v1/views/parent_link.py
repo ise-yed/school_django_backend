@@ -13,6 +13,7 @@ from apps.students.api.v1.serializers.parent_link import (
     ChangeParentPhoneSerializer,
     ParentStudentLinkSerializer,
 )
+from apps.students.api.v1.filters import ParentStudentLinkFilter
 from apps.students.models import ParentStudentLink, Student
 
 
@@ -22,39 +23,11 @@ class ParentStudentLinkViewSet(BaseViewSet):
     """
     queryset = ParentStudentLink.objects.select_related("parent_user", "student")
     serializer_class = ParentStudentLinkSerializer
+    filterset_class = ParentStudentLinkFilter
     permission_classes = [IsSchoolAdmin]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        params = self.request.query_params
-
-        is_verified = params.get("is_verified")
-        if is_verified is not None:
-            if is_verified.lower() in ("true", "1"):
-                qs = qs.filter(is_verified=True)
-            elif is_verified.lower() in ("false", "0"):
-                qs = qs.filter(is_verified=False)
-
-        student_id = params.get("student")
-        if student_id:
-            qs = qs.filter(student_id=student_id)
-
-        classroom_id = params.get("classroom")
-        if classroom_id:
-            qs = qs.filter(
-                student__enrollments__classroom_id=classroom_id,
-                student__enrollments__is_active=True,
-            )
-
-        national_code = params.get("national_code")
-        if national_code:
-            qs = qs.filter(student__national_code=national_code)
-
-        phone = params.get("phone_number")
-        if phone:
-            qs = qs.filter(parent_user__phone_number__icontains=phone)
-
-        return qs.distinct()
+        return super().get_queryset().distinct()
 
     def create(self, request, *args, **kwargs):
         serializer = AssignParentByAdminSerializer(
@@ -96,8 +69,8 @@ class ParentStudentLinkViewSet(BaseViewSet):
             new_parent_user, _ = User.objects.get_or_create(
                 school=school,
                 phone_number=new_phone,
+                role=User.Role.PARENT,
                 defaults={
-                    "role": User.Role.PARENT,
                     "first_name": link.student.father_name,
                     "last_name": link.student.last_name,
                     "is_active": True,
@@ -153,8 +126,8 @@ class ParentStudentLinkViewSet(BaseViewSet):
                 parent_user, _ = User.objects.get_or_create(
                     school=school,
                     phone_number=phone,
+                    role=User.Role.PARENT,
                     defaults={
-                        "role": User.Role.PARENT,
                         "first_name": student.father_name,
                         "last_name": student.last_name,
                         "is_active": True,

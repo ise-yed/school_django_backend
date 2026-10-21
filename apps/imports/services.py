@@ -10,6 +10,7 @@ from apps.accounts.models import User
 from apps.core.normalizers import (
     normalize_and_validate_national_code,
     normalize_digits,
+    normalize_for_search,
     normalize_persian_text,
     normalize_phone,
 )
@@ -169,15 +170,15 @@ def suggest_column_mapping(school, headers: list[str]) -> dict:
         "split_full_name": False,
     }
 
-    normalized_headers = {normalize_persian_text(h): h for h in headers}
+    normalized_headers = {normalize_for_search(h): h for h in headers}
 
     if saved_mapping and isinstance(saved_mapping.mapping_config, dict):
         for field_key in mapping.keys():
             if field_key == "split_full_name":
                 continue
             saved_col = saved_mapping.mapping_config.get(field_key)
-            if saved_col and normalize_persian_text(saved_col) in normalized_headers:
-                mapping[field_key] = normalized_headers[normalize_persian_text(saved_col)]
+            if saved_col and normalize_for_search(saved_col) in normalized_headers:
+                mapping[field_key] = normalized_headers[normalize_for_search(saved_col)]
 
     used_headers = {v for k, v in mapping.items() if k != "split_full_name" and v}
 
@@ -185,7 +186,7 @@ def suggest_column_mapping(school, headers: list[str]) -> dict:
     for field_key, synonyms in COLUMN_SYNONYMS.items():
         if mapping.get(field_key):
             continue
-        norm_syns = [normalize_persian_text(s) for s in synonyms]
+        norm_syns = [normalize_for_search(s) for s in synonyms]
         for norm_h, orig_h in normalized_headers.items():
             if orig_h in used_headers:
                 continue
@@ -198,7 +199,7 @@ def suggest_column_mapping(school, headers: list[str]) -> dict:
     for field_key, synonyms in COLUMN_SYNONYMS.items():
         if mapping.get(field_key):
             continue
-        norm_syns = [normalize_persian_text(s) for s in synonyms]
+        norm_syns = [normalize_for_search(s) for s in synonyms]
         best_header = None
         best_score = 0
         for norm_h, orig_h in normalized_headers.items():
@@ -234,14 +235,14 @@ def guess_classroom_from_text(school, filename: str, sheet_name: str) -> dict | 
         return None
 
     stem = Path(filename or "").stem.replace("_", " ").replace("-", " ")
-    target_text = normalize_persian_text(f"{stem} {sheet_name or ''}")
+    target_text = normalize_for_search(f"{stem} {sheet_name or ''}")
 
     best_classroom = None
     best_score = 0
     for c in classrooms:
-        c_name = normalize_persian_text(c.name)
-        g_name = normalize_persian_text(c.grade.title)
-        full_label = normalize_persian_text(f"{g_name} {c_name}")
+        c_name = normalize_for_search(c.name)
+        g_name = normalize_for_search(c.grade.title)
+        full_label = normalize_for_search(f"{g_name} {c_name}")
 
         if c_name and c_name in target_text:
             score = 95
@@ -741,7 +742,8 @@ def commit_import(
                 parent_user, _ = User.objects.get_or_create(
                     school=school,
                     phone_number=phone,
-                    defaults={"role": User.Role.PARENT, "is_active": True},
+                    role=User.Role.PARENT,
+                    defaults={"is_active": True},
                 )
                 link, created = ParentStudentLink.objects.get_or_create(
                     school=school,
@@ -861,9 +863,9 @@ def import_parents_excel(school, file_obj, sheet_name: str | None = None) -> dic
             "ستون‌های «کد ملی» و «موبایل ولی» در فایل اکسل تشخیص داده نشدند."
         )
 
-    col_index = {normalize_persian_text(c): i for i, c in enumerate(columns)}
-    nc_idx = col_index[normalize_persian_text(nc_col)]
-    phone_idx = col_index[normalize_persian_text(phone_col)]
+    col_index = {normalize_for_search(c): i for i, c in enumerate(columns)}
+    nc_idx = col_index[normalize_for_search(nc_col)]
+    phone_idx = col_index[normalize_for_search(phone_col)]
 
     valid_pairs = []
     errors = []
@@ -927,8 +929,8 @@ def import_parents_excel(school, file_obj, sheet_name: str | None = None) -> dic
             parent_user, _ = User.objects.get_or_create(
                 school=school,
                 phone_number=phone,
+                role=User.Role.PARENT,
                 defaults={
-                    "role": User.Role.PARENT,
                     "first_name": student.father_name,
                     "last_name": student.last_name,
                     "is_active": True,

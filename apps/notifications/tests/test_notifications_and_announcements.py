@@ -262,3 +262,119 @@ def test_announcement_cross_school_scoping(notifications_setup):
     )
     assert res2.status_code == 400
     assert "target_classroom" in res2.data
+
+
+@pytest.mark.django_db
+def test_grade_announcement_excludes_past_years_and_transferred_students(notifications_setup):
+    """
+    بررسی اینکه اعلان‌های سطح پایه (GRADE):
+    ۱. به اولیای دانش‌آموزان سال تحصیلی جاری در آن پایه می‌رسد.
+    ۲. به اولیای دانش‌آموزان سال‌های گذشته در آن پایه نمی‌رسد.
+    ۳. به اولیای دانش‌آموزان منتقل‌شده (ثبت‌نام غیرفعال) در آن پایه نمی‌رسد.
+    """
+    school_a = notifications_setup["school_a"]
+    admin_a = notifications_setup["admin_a"]
+    grade7 = notifications_setup["grade7"]
+    current_class_7 = notifications_setup["class_a7"]
+
+    # دانش‌آموز سال گذشته در پایه هفتم
+    year_past = AcademicYear.objects.create(
+        school=school_a,
+        title="۱۴۰۳-۱۴۰۴",
+        start_date="2024-09-23",
+        end_date="2025-06-21",
+        is_current=False,
+    )
+    class_old_7 = Classroom.objects.create(
+        school=school_a,
+        academic_year=year_past,
+        grade=grade7,
+        name="هفتم الف سال قبل",
+    )
+    st_old = Student.objects.create(
+        school=school_a,
+        first_name="سروش",
+        last_name="قدیمی",
+        father_name="سعید",
+        national_code="0067890121",
+    )
+    Enrollment.objects.create(
+        school=school_a,
+        student=st_old,
+        academic_year=year_past,
+        classroom=class_old_7,
+        is_active=True,
+    )
+    parent_old = User.objects.create_user(
+        phone_number="09121110001",
+        school=school_a,
+        role=User.Role.PARENT,
+    )
+    ParentStudentLink.objects.create(
+        school=school_a,
+        parent_user=parent_old,
+        student=st_old,
+        is_verified=True,
+    )
+
+    # دانش‌آموز منتقل‌شده از پایه هفتم سال جاری
+    st_transferred = Student.objects.create(
+        school=school_a,
+        first_name="مازیار",
+        last_name="منتقل‌شده",
+        father_name="منوچهر",
+        national_code="0078901235",
+    )
+    Enrollment.objects.create(
+        school=school_a,
+        student=st_transferred,
+        academic_year=current_class_7.academic_year,
+        classroom=current_class_7,
+        is_active=False,
+    )
+    parent_transferred = User.objects.create_user(
+        phone_number="09121110002",
+        school=school_a,
+        role=User.Role.PARENT,
+    )
+    ParentStudentLink.objects.create(
+        school=school_a,
+        parent_user=parent_transferred,
+        student=st_transferred,
+        is_verified=True,
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=admin_a)
+
+    # ارسال اعلان به پایه هفتم
+    res_announcement = client.post(
+        "/api/v1/notifications/announcements/",
+        {
+            "title": "جلسه اولیای پایه هفتم",
+            "body": "جلسه روز دوشنبه ساعت ۱۰ صبح برگزار می‌شود.",
+            "target_type": AnnouncementTargetType.GRADE,
+            "target_grade": grade7.id,
+            "channels": [NotificationChannel.IN_APP],
+        },
+        format="json",
+    )
+    assert res_announcement.status_code == 201
+
+    # ۱. ولی دانش‌آموز جاری پایه هفتم (parent_a1) پیام را دریافت کرده است
+    client.force_authenticate(user=notifications_setup["parent_a1"])
+    res_inbox_current = client.get("/api/v1/notifications/inbox/")
+    assert res_inbox_current.status_code == 200
+    assert len(res_inbox_current.data["results"]) == 1
+
+    # ۲. ولی دانش‌آموز سال قبل پایه هفتم (parent_old) پیام را دریافت نکرده است
+    client.force_authenticate(user=parent_old)
+    res_inbox_old = client.get("/api/v1/notifications/inbox/")
+    assert res_inbox_old.status_code == 200
+    assert len(res_inbox_old.data["results"]) == 0
+
+    # ۳. ولی دانش‌آموز منتقل‌شده (parent_transferred) پیام را دریافت نکرده است
+    client.force_authenticate(user=parent_transferred)
+    res_inbox_transferred = client.get("/api/v1/notifications/inbox/")
+    assert res_inbox_transferred.status_code == 200
+    assert len(res_inbox_transferred.data["results"]) == 0

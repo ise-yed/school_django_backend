@@ -5,7 +5,15 @@ PERSIAN_TO_ENGLISH_DIGITS = str.maketrans(
     "01234567890123456789",
 )
 
-ARABIC_TO_PERSIAN_CHARS = str.maketrans({
+# تبدیل حروف عربی به فارسی برای نمایش و ذخیره‌سازی داده‌ها (حفظ «آ»، نیم‌فاصله، همزه و ...)
+DISPLAY_PERSIAN_TRANS = str.maketrans({
+    "ي": "ی",
+    "ى": "ی",
+    "ك": "ک",
+})
+
+# تبدیل تهاجمی حروف صرفاً برای ایندکس و جستجوی فازی (مخصوص normalized_search_name و کوئری‌های جستجو)
+SEARCH_AGGRESSIVE_TRANS = str.maketrans({
     "ي": "ی",
     "ى": "ی",
     "ئ": "ی",
@@ -15,8 +23,10 @@ ARABIC_TO_PERSIAN_CHARS = str.maketrans({
     "إ": "ا",
     "أ": "ا",
     "آ": "ا",
-    "\u200c": " ",  # تبدیل نیم‌فاصله به فاصله معمولی برای یکنواختی جستجو
+    "\u200c": " ",  # تبدیل نیم‌فاصله به فاصله معمولی برای یکنواختی تطبیق جستجو
 })
+
+DIACRITICS_REGEX = re.compile(r"[\u064B-\u065F\u0670]")
 
 
 def normalize_digits(value: str) -> str:
@@ -26,9 +36,33 @@ def normalize_digits(value: str) -> str:
 
 
 def normalize_persian_text(text: str) -> str:
+    """
+    نرمال‌سازی سبک برای نمایش و ذخیره‌سازی داده‌ها:
+    - تبدیل ي و ك عربی به ی و ک فارسی
+    - تبدیل ارقام فارسی و عربی به انگلیسی
+    - حفظ دست‌نخورده‌ی «آ»، همزه‌ها («ئ»، «ؤ»)، «ة» و نیم‌فاصله (\u200c)
+    - پاکسازی فاصله‌های اضافی (بدون دستکاری نیم‌فاصله‌ها)
+    """
     if not text:
         return ""
-    text = str(text).translate(PERSIAN_TO_ENGLISH_DIGITS).translate(ARABIC_TO_PERSIAN_CHARS)
+    text = str(text).translate(PERSIAN_TO_ENGLISH_DIGITS).translate(DISPLAY_PERSIAN_TRANS)
+    text = re.sub(r"[^\S\u200c]+", " ", text)
+    return text.strip()
+
+
+def normalize_for_search(text: str) -> str:
+    """
+    نرمال‌سازی تهاجمی فقط برای ایندکس و تطبیق جستجو (مانند normalized_search_name):
+    - تبدیل ارقام به انگلیسی
+    - تبدیل ي/ك، آ/أ/إ به ا، ئ به ی، ؤ به و، ة به ه
+    - تبدیل نیم‌فاصله به فاصله
+    - حذف اعراب و تنوین
+    - حذف فاصله‌های اضافی
+    """
+    if not text:
+        return ""
+    text = str(text).translate(PERSIAN_TO_ENGLISH_DIGITS).translate(SEARCH_AGGRESSIVE_TRANS)
+    text = DIACRITICS_REGEX.sub("", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 

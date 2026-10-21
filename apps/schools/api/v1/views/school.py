@@ -15,6 +15,7 @@ class SchoolManagementViewSet(viewsets.ModelViewSet):
     queryset = School.objects.all()
     serializer_class = SchoolSerializer
     permission_classes = [IsSuperUser]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     @action(detail=True, methods=["post"], url_path="create-admin")
     def create_admin(self, request, pk=None):

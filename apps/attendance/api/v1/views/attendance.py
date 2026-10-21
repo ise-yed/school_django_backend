@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -32,11 +33,15 @@ class AttendanceAccessPermission(IsTeacherOrSchoolAdmin):
         return IsParentReadOnly().has_permission(request, view)
 
 
+from apps.attendance.api.v1.filters import AttendanceRecordFilter
+
+
 class AttendanceRecordViewSet(BaseViewSet):
     queryset = AttendanceRecord.objects.select_related(
         "student", "classroom", "recorded_by"
     )
     serializer_class = AttendanceRecordSerializer
+    filterset_class = AttendanceRecordFilter
     permission_classes = [AttendanceAccessPermission]
     teacher_classroom_lookup = "classroom__teacher_assignments__teacher"
     parent_student_lookup = "student__parent_links__parent_user"
@@ -44,7 +49,6 @@ class AttendanceRecordViewSet(BaseViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        params = self.request.query_params
 
         # ولی فقط رکوردهای فرزندان تأییدشده‌ی خودش را می‌بیند
         if user.role == User.Role.PARENT:
@@ -52,27 +56,6 @@ class AttendanceRecordViewSet(BaseViewSet):
                 student__parent_links__parent_user=user,
                 student__parent_links__is_verified=True,
             )
-
-        classroom_id = params.get("classroom")
-        if classroom_id:
-            qs = qs.filter(classroom_id=classroom_id)
-
-        student_id = params.get("student")
-        if student_id:
-            qs = qs.filter(student_id=student_id)
-
-        session_number = params.get("session_number")
-        if session_number is not None and session_number != "":
-            qs = qs.filter(session_number=session_number)
-
-        status_filter = params.get("status")
-        if status_filter:
-            qs = qs.filter(status=status_filter)
-
-        raw_date = params.get("date")
-        if raw_date:
-            greg_date = JalaliDateField().to_internal_value(raw_date)
-            qs = qs.filter(date=greg_date)
 
         return qs.distinct()
 
@@ -83,23 +66,24 @@ class AttendanceRecordViewSet(BaseViewSet):
         check_teacher_classroom_and_session_access(
             self.request.user, classroom, session_number, date=date
         )
-        instance = serializer.save(school=self.get_school(), recorded_by=self.request.user)
-        AuditLog.objects.create(
-            school=self.get_school(),
-            actor=self.request.user,
-            action=AuditLog.Action.CREATE,
-            target_model="AttendanceRecord",
-            target_id=str(instance.id),
-            changes={
-                "status": {"old": None, "new": instance.status},
-                "note": {"old": None, "new": instance.note or ""},
-                "date": {"old": None, "new": str(instance.date)},
-                "session_number": {"old": None, "new": instance.session_number},
-                "student_id": {"old": None, "new": instance.student_id},
-                "classroom_id": {"old": None, "new": instance.classroom_id},
-            },
-            ip_address=self.get_client_ip(),
-        )
+        with transaction.atomic():
+            instance = serializer.save(school=self.get_school(), recorded_by=self.request.user)
+            AuditLog.objects.create(
+                school=self.get_school(),
+                actor=self.request.user,
+                action=AuditLog.Action.CREATE,
+                target_model="AttendanceRecord",
+                target_id=str(instance.id),
+                changes={
+                    "status": {"old": None, "new": instance.status},
+                    "note": {"old": None, "new": instance.note or ""},
+                    "date": {"old": None, "new": str(instance.date)},
+                    "session_number": {"old": None, "new": instance.session_number},
+                    "student_id": {"old": None, "new": instance.student_id},
+                    "classroom_id": {"old": None, "new": instance.classroom_id},
+                },
+                ip_address=self.get_client_ip(),
+            )
 
     def perform_update(self, serializer):
         instance = self.get_object()
@@ -125,29 +109,30 @@ class AttendanceRecordViewSet(BaseViewSet):
             "session_number": instance.session_number,
             "classroom_id": instance.classroom_id,
         }
-        updated = serializer.save(recorded_by=self.request.user)
-        new_values = {
-            "status": updated.status,
-            "note": updated.note or "",
-            "date": str(updated.date),
-            "session_number": updated.session_number,
-            "classroom_id": updated.classroom_id,
-        }
-        diff = {
-            k: {"old": old_values[k], "new": new_values[k]}
-            for k in old_values
-            if old_values[k] != new_values[k]
-        }
-        if diff:
-            AuditLog.objects.create(
-                school=self.get_school(),
-                actor=self.request.user,
-                action=AuditLog.Action.UPDATE,
-                target_model="AttendanceRecord",
-                target_id=str(updated.id),
-                changes=diff,
-                ip_address=self.get_client_ip(),
-            )
+        with transaction.atomic():
+            updated = serializer.save(recorded_by=self.request.user)
+            new_values = {
+                "status": updated.status,
+                "note": updated.note or "",
+                "date": str(updated.date),
+                "session_number": updated.session_number,
+                "classroom_id": updated.classroom_id,
+            }
+            diff = {
+                k: {"old": old_values[k], "new": new_values[k]}
+                for k in old_values
+                if old_values[k] != new_values[k]
+            }
+            if diff:
+                AuditLog.objects.create(
+                    school=self.get_school(),
+                    actor=self.request.user,
+                    action=AuditLog.Action.UPDATE,
+                    target_model="AttendanceRecord",
+                    target_id=str(updated.id),
+                    changes=diff,
+                    ip_address=self.get_client_ip(),
+                )
 
     def perform_destroy(self, instance):
         check_teacher_classroom_and_session_access(
@@ -163,16 +148,17 @@ class AttendanceRecordViewSet(BaseViewSet):
             "classroom_id": instance.classroom_id,
             "student_id": instance.student_id,
         }
-        instance.delete()
-        AuditLog.objects.create(
-            school=school,
-            actor=self.request.user,
-            action=AuditLog.Action.DELETE,
-            target_model="AttendanceRecord",
-            target_id=record_id,
-            changes={k: {"old": v, "new": None} for k, v in old_values.items()},
-            ip_address=self.get_client_ip(),
-        )
+        with transaction.atomic():
+            instance.delete()
+            AuditLog.objects.create(
+                school=school,
+                actor=self.request.user,
+                action=AuditLog.Action.DELETE,
+                target_model="AttendanceRecord",
+                target_id=record_id,
+                changes={k: {"old": v, "new": None} for k, v in old_values.items()},
+                ip_address=self.get_client_ip(),
+            )
 
     @action(
         detail=True,

@@ -90,8 +90,8 @@ class ParentOTPVerifyView(views.APIView):
                     parent_user, _ = User.objects.get_or_create(
                         school=student.school,
                         phone_number=phone,
+                        role=User.Role.PARENT,
                         defaults={
-                            "role": User.Role.PARENT,
                             "first_name": student.father_name,
                             "last_name": student.last_name,
                             "is_active": True,
